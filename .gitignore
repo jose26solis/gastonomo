@@ -26,6 +26,9 @@ build/
 .idea/
 .vscode/
 *.iml
+# Local History (VS Code): guarda una copia de cada archivo en cada save,
+# incluidos .env con credenciales reales -- nunca debe subirse.
+.history/
 
 # ---- Sistema operativo ----
 .DS_Store

@@ -33,6 +33,7 @@ flowchart TD
         direction TB
         RepoBase["repositories/base_repository.py<br/><i>CRUD genérico</i>"]
         RepoCat["repositories/categoria_repository.py<br/><i>consultas de categoría</i>"]
+        RepoUsr["repositories/usuario_repository.py<br/><i>consultas del titular</i>"]
         Modelos["models/<br/>usuario.py · categoria.py · base.py · enums.py"]
     end
 
@@ -54,8 +55,11 @@ flowchart TD
     SCat --> ErrNeg
     ErrNeg -.->|se traduce en| Errores
     SCat --> RepoCat
+    SCat --> RepoUsr
     RepoCat --> RepoBase
+    RepoUsr --> RepoBase
     RepoCat --> Modelos
+    RepoUsr --> Modelos
     RepoBase --> Modelos
     Modelos --> BD
 
@@ -72,7 +76,7 @@ flowchart TD
 
     class RSalud,RCat,Schemas,Deps,Errores pres
     class SCat,Comando,ErrNeg neg
-    class RepoBase,RepoCat,Modelos dat
+    class RepoBase,RepoCat,RepoUsr,Modelos dat
     class Settings,DB conf
     class Cliente,BD ext
 ```
@@ -114,15 +118,18 @@ sequenceDiagram
     participant D as dependencies.py<br/>(presentación)
     participant S as CategoriaService<br/>(negocio)
     participant P as CategoriaRepository<br/>(datos)
+    participant U as UsuarioRepository<br/>(datos)
     participant BD as Base de datos
 
     C->>R: POST /api/categorias
     R->>D: pide el servicio
     D->>D: abre la sesión de base de datos
-    D-->>R: CategoriaService(CategoriaRepository(sesión))
+    D-->>R: CategoriaService(CategoriaRepository, UsuarioRepository)
     R->>R: convierte el JSON en CrearCategoriaComando
     R->>S: crear(comando)
     S->>S: valida nombre y color
+    S->>U: obtener_por_id (¿el titular existe y está activo?)
+    U->>BD: SELECT
     S->>P: buscar_por_nombre (¿ya existe?)
     P->>BD: SELECT
     S->>P: obtener_por_id (¿la padre es del mismo usuario?)

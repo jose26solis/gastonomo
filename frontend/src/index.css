@@ -1,0 +1,227 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  --color-fondo: #0f172a;
+  --color-superficie: #1e293b;
+  --color-borde: #334155;
+  --color-texto: #f1f5f9;
+  --color-texto-tenue: #94a3b8;
+  --color-primario: #2563eb;
+  --color-exito: #16a34a;
+  --color-peligro: #dc2626;
+  --color-advertencia: #d97706;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-fondo);
+  color: var(--color-texto);
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+.subtitulo {
+  color: var(--color-texto-tenue);
+  margin-top: 0;
+}
+
+.campo-usuario {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--color-texto-tenue);
+  margin: 1.5rem 0 1rem;
+}
+
+.campo-usuario input {
+  width: 5rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--color-superficie);
+  border: 1px solid var(--color-borde);
+  border-radius: 0.375rem;
+  color: var(--color-texto);
+}
+
+.acciones-vincular {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-borde);
+  background: var(--color-superficie);
+  color: var(--color-texto);
+  padding: 0.6rem 1rem;
+}
+
+.acciones-vincular button {
+  background: var(--color-primario);
+  border-color: var(--color-primario);
+  color: white;
+  flex: 1;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.boton-peligro {
+  color: var(--color-peligro);
+  border-color: var(--color-peligro);
+  background: transparent;
+}
+
+.mensaje-error {
+  color: var(--color-peligro);
+  background: color-mix(in srgb, var(--color-peligro) 12%, transparent);
+  border: 1px solid var(--color-peligro);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.mensaje-exito {
+  color: var(--color-exito);
+  background: color-mix(in srgb, var(--color-exito) 12%, transparent);
+  border: 1px solid var(--color-exito);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.vacio {
+  color: var(--color-texto-tenue);
+  font-style: italic;
+}
+
+.lista-cuentas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tarjeta-cuenta {
+  border: 1px solid var(--color-borde);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: var(--color-superficie);
+}
+
+.encabezado-cuenta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.proveedor {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.estado {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.estado--activa {
+  color: var(--color-exito);
+}
+
+.estado--token_expirado {
+  color: var(--color-advertencia);
+}
+
+.estado--desvinculada {
+  color: var(--color-texto-tenue);
+}
+
+.estado--error {
+  color: var(--color-peligro);
+}
+
+.direccion {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.ultima-sincronizacion {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-texto-tenue);
+}
+
+.acciones-cuenta {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.acciones-cuenta button {
+  flex: 1;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.lista-mensajes {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-top: 1px solid var(--color-borde);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.lista-mensajes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.lista-mensajes .asunto {
+  color: var(--color-texto);
+}
+
+.lista-mensajes .remitente {
+  color: var(--color-texto-tenue);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pagina-callback {
+  text-align: center;
+  padding-top: 4rem;
+}
+
+.enlace-volver {
+  display: inline-block;
+  margin-top: 1.5rem;
+  color: var(--color-primario);
+}
