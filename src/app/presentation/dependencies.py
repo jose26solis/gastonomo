@@ -12,16 +12,21 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.business.services.categoria_service import CategoriaService
+from app.business.services.comercio_service import ComercioService
 from app.business.services.correo.gmail import GmailProveedor
 from app.business.services.correo.outlook import OutlookProveedor
 from app.business.services.correo.proveedor import ProveedorDeCorreo
 from app.business.services.cuenta_correo_service import CuentaCorreoService
+from app.business.services.presupuesto_service import PresupuestoService
 from app.config.cliente_http import obtener_cliente_http
 from app.config.database import obtener_sesion
 from app.config.settings import obtener_configuracion
 from app.data.models.enums import ProveedorCorreo
 from app.data.repositories.categoria_repository import CategoriaRepository
+from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
+from app.data.repositories.comercio_repository import ComercioRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.presupuesto_repository import PresupuestoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 
 SesionDependencia = Annotated[Session, Depends(obtener_sesion)]
@@ -64,3 +69,25 @@ def obtener_servicio_de_cuentas_correo(
 ServicioDeCuentasCorreo = Annotated[
     CuentaCorreoService, Depends(obtener_servicio_de_cuentas_correo)
 ]
+
+
+def obtener_servicio_de_comercios(sesion: SesionDependencia) -> ComercioService:
+    """Arma el servicio de comercios con sus repositorios sobre la sesion actual."""
+    return ComercioService(
+        ComercioRepository(sesion),
+        ComercioCategoriaRepository(sesion),
+        CategoriaRepository(sesion),
+    )
+
+
+ServicioDeComercios = Annotated[ComercioService, Depends(obtener_servicio_de_comercios)]
+
+
+def obtener_servicio_de_presupuestos(sesion: SesionDependencia) -> PresupuestoService:
+    """Arma el servicio de presupuestos con sus repositorios sobre la sesion actual."""
+    return PresupuestoService(
+        PresupuestoRepository(sesion), CategoriaRepository(sesion), UsuarioRepository(sesion)
+    )
+
+
+ServicioDePresupuestos = Annotated[PresupuestoService, Depends(obtener_servicio_de_presupuestos)]

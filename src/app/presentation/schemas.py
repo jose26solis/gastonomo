@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
+from app.data.models.enums import EstadoCuentaCorreo, EstadoPresupuesto, Moneda, ProveedorCorreo
 
 
 class SaludResponse(BaseModel):
@@ -130,3 +130,85 @@ class ResumenFinancieroResponse(BaseModel):
 
     comprobantes: list[ComprobanteParseadoResponse]
     por_mes: list[ResumenMensualResponse]
+
+
+class ComercioResponse(BaseModel):
+    """Un comercio del catálogo compartido."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: str
+    nombre_normalizado: str
+    identificacion_tributaria: str | None
+    provincia: str | None
+
+
+class ComercioClasificadoResponse(BaseModel):
+    """Un comercio real, resuelto del catálogo, con su categoría sugerida (si la hay)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    comercio_id: int
+    nombre: str
+    categoria_id: int | None
+    categoria_nombre: str | None
+    cantidad_transacciones: int
+    total: Decimal
+    moneda: str
+
+
+class AsignarCategoriaComercioRequest(BaseModel):
+    """Cuerpo de POST /api/comercios/{id}/categoria."""
+
+    usuario_id: int = Field(gt=0)
+    categoria_id: int = Field(gt=0)
+
+
+class CrearPresupuestoRequest(BaseModel):
+    """Cuerpo de POST /api/presupuestos.
+
+    Crear el mismo (usuario, categoría, año, mes) dos veces no duplica: la
+    segunda llamada corrige el límite de la que ya existía.
+    """
+
+    usuario_id: int = Field(gt=0)
+    categoria_id: int = Field(gt=0)
+    anio: int = Field(ge=2000, le=2100)
+    mes: int = Field(ge=1, le=12)
+    moneda: Moneda
+    monto_limite: Decimal = Field(gt=0)
+    umbral_alerta: int = Field(default=80, ge=1, le=100)
+
+
+class PresupuestoResponse(BaseModel):
+    """Un presupuesto tal como quedó guardado -sin el consumo, que se calcula aparte."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuario_id: int
+    categoria_id: int
+    anio: int
+    mes: int
+    moneda: Moneda
+    monto_limite: Decimal
+    umbral_alerta: int
+
+
+class EstadoDePresupuestoResponse(BaseModel):
+    """El límite de un presupuesto junto con su consumo real del período."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    presupuesto_id: int
+    categoria_id: int
+    categoria_nombre: str
+    anio: int
+    mes: int
+    moneda: str
+    monto_limite: Decimal
+    monto_consumido: Decimal
+    umbral_alerta: int
+    porcentaje_usado: float
+    estado: EstadoPresupuesto

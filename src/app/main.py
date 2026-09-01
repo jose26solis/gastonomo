@@ -20,7 +20,14 @@ from app.business.errors import (
 from app.config.cliente_http import cerrar_cliente_http
 from app.config.database import crear_tablas, sembrar_usuario_de_demostracion
 from app.config.settings import obtener_configuracion
-from app.presentation.routers import categorias, cuentas_correo, salud
+from app.presentation.routers import (
+    categorias,
+    comercios,
+    cuentas_correo,
+    presupuestos,
+    reportes,
+    salud,
+)
 
 configuracion = obtener_configuracion()
 
@@ -51,6 +58,9 @@ app.add_middleware(
 app.include_router(salud.router)
 app.include_router(categorias.router)
 app.include_router(cuentas_correo.router)
+app.include_router(comercios.router)
+app.include_router(presupuestos.router)
+app.include_router(reportes.router)
 
 
 @app.exception_handler(DatosInvalidos)

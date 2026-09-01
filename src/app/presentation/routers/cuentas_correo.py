@@ -27,10 +27,16 @@ from app.business.errors import DatosInvalidos
 from app.business.seguridad.cifrado import TokenIlegible, cifrar, descifrar
 from app.business.services.cuenta_correo_service import VincularCuentaComando
 from app.data.models.enums import ProveedorCorreo
-from app.presentation.dependencies import ServicioDeCuentasCorreo
+from app.presentation.dependencies import (
+    ServicioDeComercios,
+    ServicioDeCuentasCorreo,
+    ServicioDePresupuestos,
+)
 from app.presentation.schemas import (
+    ComercioClasificadoResponse,
     ComprobanteParseadoResponse,
     CuentaCorreoResponse,
+    EstadoDePresupuestoResponse,
     IniciarVinculacionResponse,
     MensajeResumidoResponse,
     ResumenFinancieroResponse,
@@ -184,6 +190,56 @@ def resumen_financiero(
     """
     resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
     return ResumenFinancieroResponse.model_validate(resumen)
+
+
+@router.get(
+    "/{cuenta_id}/comercios",
+    response_model=list[ComercioClasificadoResponse],
+    summary="Resolver y clasificar los comercios de los comprobantes de BAC",
+)
+def comercios_clasificados(
+    cuenta_id: int,
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    usuario_id: int = Query(gt=0),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> list[ComercioClasificadoResponse]:
+    """Lee los comprobantes de BAC, resuelve cada comercio en el catálogo
+    compartido y adjunta la categoría que este titular ya le haya asignado,
+    si la hay. Un comercio nuevo queda sin categoría hasta que alguien la
+    asigne con `POST /api/comercios/{id}/categoria`.
+    """
+    resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
+    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, resumen.comprobantes)
+    return [ComercioClasificadoResponse.model_validate(c) for c in clasificados]
+
+
+@router.get(
+    "/{cuenta_id}/presupuestos",
+    response_model=list[EstadoDePresupuestoResponse],
+    summary="Estado de los presupuestos del período, contra el gasto real",
+)
+def presupuestos_del_periodo(
+    cuenta_id: int,
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    servicio_presupuestos: ServicioDePresupuestos,
+    usuario_id: int = Query(gt=0),
+    anio: int = Query(ge=2000, le=2100),
+    mes: int = Query(ge=1, le=12),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> list[EstadoDePresupuestoResponse]:
+    """Lee los comprobantes de BAC, los clasifica por comercio y compara el
+    consumo real de cada categoría contra su presupuesto del período.
+
+    Un presupuesto sin ningún comercio clasificado en su categoría sale con
+    `monto_consumido = 0`, no con un error: es simplemente que todavía no
+    hubo gasto reconocido ahí, o que lo que hubo no está clasificado.
+    """
+    resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
+    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, resumen.comprobantes)
+    estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes, clasificados)
+    return [EstadoDePresupuestoResponse.model_validate(e) for e in estados]
 
 
 @router.delete("/{cuenta_id}", status_code=204, summary="Desvincular un buzón")

@@ -30,3 +30,15 @@ class EstadoCuentaCorreo(StrEnum):
     TOKEN_EXPIRADO = "TOKEN_EXPIRADO"
     DESVINCULADA = "DESVINCULADA"
     ERROR = "ERROR"
+
+
+class EstadoPresupuesto(StrEnum):
+    """Dónde va el gasto de una categoría respecto a su límite del mes.
+
+    No se persiste: se calcula cada vez, comparando el límite guardado contra
+    el consumo real del período. Ver `PresupuestoService.calcular_estado`.
+    """
+
+    EN_RANGO = "EN_RANGO"
+    CERCA_DEL_LIMITE = "CERCA_DEL_LIMITE"
+    EXCEDIDO = "EXCEDIDO"
