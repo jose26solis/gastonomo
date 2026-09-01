@@ -6,20 +6,20 @@ Sistema web multiusuario donde cualquier persona crea su cuenta, vincula el buz�
 sus comprobantes de compra, y el sistema clasifica su gasto por categoría mostrándole en vivo el
 avance contra su presupuesto mensual.
 
-**EIF509 Desarrollo de Aplicaciones Basadas en Web · NRC 51092 · Grupo G01 · II Ciclo 2026**
+**EIF509 Desarrollo de Aplicaciones Basadas en Web · II Ciclo 2026**
 Universidad Nacional · Escuela de Informática y Computación
 
 | |                                                         |
 |---|---------------------------------------------------------|
-| **Integrante 1** | Luis Antonio Montes de Oca Ruiz · carné 191862          |
-| **Integrante 2** | Jose Alexis Solís Carvajal · carné `<COMPLETAR>`        |
-| **Entrega actual** | Laboratorio 1 — Arquitectura base y esqueleto por capas |
+| **Integrantes** | Jose Alexis Solís Carvajal · 1-1623-0238          |
+|  |    Luis Antonio Montes de Oca Ruiz · 1-1800-0270     |
+| **Entrega actual** | Laboratorio 2 — La capa de datos completa: PostgreSQL + MongoDB |
 
 ---
 
 ## Stack
 
-**Python 3.14 · FastAPI · SQLAlchemy 2.0 · PostgreSQL · React**
+**Python 3.14 · FastAPI · SQLAlchemy 2.0 · PostgreSQL · MongoDB · React**
 
 > El curso recomienda Java 21 + Spring Boot 3. Este equipo solicitó y obtuvo autorización del
 > profesor para usar un stack alternativo equivalente. La justificación técnica completa —con las
@@ -30,12 +30,25 @@ Universidad Nacional · Escuela de Informática y Computación
 
 ## Qué incluye este laboratorio
 
-El Laboratorio 1 entrega **la arquitectura, no el sistema**. Es el esqueleto por capas funcionando
-de punta a punta con una sola entidad del dominio (`Categoria`, con `Usuario` como su dueña), para
-demostrar la estructura sin adelantar trabajo de los laboratorios siguientes.
+El **Laboratorio 2** entrega **la capa de datos completa**, con persistencia políglota:
 
-El dominio completo —once entidades y dos procesos de negocio— está diseñado y documentado en la
-[Propuesta de Dominio](docs/propuesta-dominio.md); se implementa en los laboratorios siguientes.
+| Entregable | Dónde está |
+|---|---|
+| Esquema PostgreSQL en 3FN con migraciones Flyway `V1`…`V5`, restricciones e índices justificados | [`db/postgres/migrations/`](db/postgres/migrations/) |
+| Subdominio en MongoDB: la colección `bitacora_compras`, con la decisión de incrustar justificada | [`db/mongo/init/`](db/mongo/init/) · [ADR-002](docs/adr/ADR-002-subdominio-documental-en-mongodb.md) |
+| Datos de ejemplo realistas en las dos bases | [`db/postgres/seeds/`](db/postgres/seeds/) · [`db/mongo/init/02_datos_de_ejemplo.js`](db/mongo/init/02_datos_de_ejemplo.js) |
+| Docker Compose que levanta PostgreSQL y MongoDB con un solo comando | [`docker-compose.yml`](docker-compose.yml) |
+| Documento técnico del modelo y las decisiones de diseño | [Modelo de datos](docs/modelo-de-datos.md) |
+
+En números: **12 tablas · 17 llaves foráneas · 17 restricciones `UNIQUE` · 42 `CHECK` · 46 índices**
+en PostgreSQL, más **1 colección con validador de esquema y 4 índices** en MongoDB.
+
+El **Laboratorio 1**, que sigue en el repositorio, entregó la arquitectura por capas funcionando de
+punta a punta con dos entidades (`Usuario` y `Categoria`) sobre SQLite. La aplicación **todavía usa
+SQLite**: conectarla a estas dos bases es trabajo de un laboratorio siguiente.
+
+El dominio completo está diseñado y documentado en la
+[Propuesta de Dominio](docs/propuesta-dominio.md).
 
 > **Nota:** por decisión del equipo se adelantó la vinculación de buzones de correo (Outlook y
 > Gmail) fuera del orden de los laboratorios, para validar contra un banco real que la ingesta es
@@ -44,10 +57,68 @@ El dominio completo —once entidades y dos procesos de negocio— está diseña
 
 ---
 
-## Cómo correrlo
+## Cómo levantar las bases de datos
 
-Necesitás **Python 3.12 o superior** (nosotros usamos 3.14). **No hace falta instalar ninguna base
-de datos**: en este laboratorio la aplicación usa SQLite local y crea el archivo sola al arrancar.
+Necesitás **Docker Desktop**. Desde la raíz del repositorio:
+
+```bash
+docker compose up -d
+```
+
+Eso levanta PostgreSQL, aplica las cinco migraciones de Flyway con sus datos de ejemplo, y levanta
+MongoDB con la colección `bitacora_compras` creada, validada, indexada y sembrada. No hay que
+configurar nada más: las credenciales de desarrollo vienen como valores por defecto (para cambiarlas,
+copiá `.env.ejemplo` a `.env`).
+
+Comprobá que todo quedó arriba:
+
+```bash
+docker compose ps -a
+```
+
+`gastonomo-postgres` y `gastonomo-mongo` deben decir `Up (healthy)`, y **`gastonomo-flyway` debe
+decir `Exited (0)`**: es una tarea que migra y se apaga, no un servicio.
+
+Mirá los datos de PostgreSQL:
+
+```bash
+docker compose exec postgres psql -U gastonomo -d gastonomo -c "\dt"
+```
+
+Y los de MongoDB:
+
+```bash
+docker compose exec mongo mongosh --quiet -u gastonomo -p gastonomo_local --authenticationDatabase admin gastonomo --eval "db.bitacora_compras.findOne({compra_id: NumberLong(7)})"
+```
+
+Para borrar todo y empezar de cero:
+
+```bash
+docker compose down -v
+```
+
+### Comprobar que las restricciones hacen su trabajo
+
+Doce intentos de meter datos que el dominio prohíbe. Los doce deben salir como `RECHAZADO OK`:
+
+```bash
+docker compose exec -T postgres psql -U gastonomo -d gastonomo -q < db/pruebas/restricciones_postgres.sql
+```
+
+Seis intentos contra el validador de MongoDB, más las consultas que justifican el diseño de la
+colección:
+
+```bash
+docker compose exec -T mongo mongosh --quiet -u gastonomo -p gastonomo_local --authenticationDatabase admin gastonomo < db/pruebas/validador_mongo.js
+```
+
+---
+
+## Cómo correr la aplicación
+
+Necesitás **Python 3.12 o superior** (nosotros usamos 3.14). **No hace falta Docker para esta
+parte**: la aplicación sigue usando SQLite local y crea el archivo sola al arrancar. Conectarla a las
+bases de arriba es trabajo de un laboratorio siguiente.
 
 ### 1. Clonar y crear el entorno virtual
 
@@ -258,9 +329,12 @@ el flujo está bien armado antes de tener las credenciales a mano.
 
 | Documento | Qué contiene |
 |---|---|
-| [Propuesta de Dominio](docs/propuesta-dominio.md) | El negocio, los actores, las 11 entidades y los 2 procesos con sus reglas, cálculos y validaciones. |
+| [Modelo de datos](docs/modelo-de-datos.md) | **Laboratorio 2.** El esquema relacional, su normalización, sus restricciones e índices justificados, y el subdominio de MongoDB con su justificación completa. |
+| [Propuesta de Dominio](docs/propuesta-dominio.md) | El negocio, los actores, las entidades y los 2 procesos con sus reglas, cálculos y validaciones. |
 | [Arquitectura](docs/arquitectura.md) | Diagramas de capas, recorrido de una petición, modelo entidad-relación y despliegue previsto. |
 | [ADR-001 · Elección del stack](docs/adr/ADR-001-eleccion-del-stack.md) | Por qué Python + FastAPI + PostgreSQL + React, qué descartamos y qué nos cuesta. |
+| [ADR-002 · Subdominio documental](docs/adr/ADR-002-subdominio-documental-en-mongodb.md) | Por qué la trazabilidad de la compra va en MongoDB incrustada, qué candidatos descartamos y qué invalidaría la decisión. |
+| [ADR-003 · Flyway para las migraciones](docs/adr/ADR-003-flyway-para-las-migraciones.md) | Por qué Flyway en un contenedor en lugar de Alembic, y qué nos cuesta. |
 
 ---
 

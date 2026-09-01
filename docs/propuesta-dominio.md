@@ -11,8 +11,8 @@
 |                       |                                                             |
 |-----------------------|-------------------------------------------------------------|
 | **Sistema propuesto** | **Gastonomo** — control de gastos personales por categorías |
-| **Integrantes**       | Jose Alexis Solís Carvajal · carné               |
-|        |    Luis Antonio Montes de Oca Ruiz · carné 191862                      |
+| **Integrantes**       | Jose Alexis Solís Carvajal · 1-1623-0238              |
+|        |    Luis Antonio Montes de Oca Ruiz · 1-1800-0270                      |
 
 ---
 
@@ -159,6 +159,13 @@ Tres consecuencias de diseño:
    puede partir después un cargo ingerido, y las facturas electrónicas en XML sí traen renglones.
 
 ### Subdominio documental candidato
+
+> **Revisado en el Laboratorio 2.** Lo que sigue es lo que concluimos en el Laboratorio 1, y el
+> argumento sobre los comprobantes **sigue vigente**: no se almacenan. Lo que cambió es que
+> encontramos el subdominio documental en otro lugar —el rastro de lo que el sistema *hace* con esos
+> datos, no los datos que entran—. Está implementado en MongoDB como la colección
+> `bitacora_compras`, y la decisión completa está en
+> [ADR-002](adr/ADR-002-subdominio-documental-en-mongodb.md).
 
 **No identificamos ninguno.** Todo lo que el sistema persiste tiene esquema fijo y se modela
 completo en PostgreSQL.
@@ -377,10 +384,15 @@ que sí podemos terminar bien.
 
 ## 6 · Qué se entrega en el Laboratorio 1
 
-Este documento describe el dominio **completo**, que es lo que se construirá a lo largo del curso.
-El código entregado en este laboratorio es deliberadamente el esqueleto mínimo: la arquitectura por
-capas funcionando de punta a punta con **una** entidad del dominio (`Categoria`, con `Usuario` como
-su dueña), para demostrar la estructura sin adelantar trabajo de los laboratorios siguientes.
+Este documento describe el dominio **completo**: las once entidades y los dos procesos de negocio
+que se construirán a lo largo del curso.
+
+El código entregado en este laboratorio es deliberadamente el esqueleto mínimo. Implementa **dos**
+de esas once entidades —`Categoria`, que es el eje del sistema, y `Usuario`, que es su dueña— para
+demostrar la arquitectura por capas funcionando de punta a punta sin adelantar trabajo de los
+laboratorios siguientes. Es una decisión de alcance, no una omisión: el dominio que se evalúa en
+esta entrega es el de este documento, y el esqueleto se evalúa por su separación de
+responsabilidades.
 
 **Entregado en el Laboratorio 1:** la arquitectura por capas, las entidades `Usuario` y
 `Categoria` con sus reglas de negocio, y la integración continua.
