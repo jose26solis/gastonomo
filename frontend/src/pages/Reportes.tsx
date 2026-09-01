@@ -1,148 +1,89 @@
-import { CheckSquare, Square } from "@phosphor-icons/react";
+import { EnvelopeSimple, FileCsv, FilePdf, FileXls } from "@phosphor-icons/react";
 import { useState } from "react";
-import { MuestraBadge } from "../components/MuestraBadge";
+import { api, ErrorDeApiError } from "../api";
+import { useCuentaActiva } from "../lib/useCuentaActiva";
 
-const BLOQUES: Record<string, string> = {
-  resumen: "Resumen ejecutivo",
-  categorias: "Desglose por categoría",
-  comercios: "Top comercios",
-  presupuestos: "Cumplimiento de presupuesto",
-  movimientos: "Detalle de movimientos",
-};
+function mensajeDeError(error: unknown): string {
+  return error instanceof ErrorDeApiError ? error.message : "Ocurrió un error inesperado.";
+}
 
-const CATEGORIAS_MUESTRA = [
-  { nombre: "Alimentación", color: "#b5abfc", pct: "31%", monto: "₡234,400" },
-  { nombre: "Supermercado", color: "#968ae0", pct: "26%", monto: "₡198,900" },
-  { nombre: "Gasolina", color: "#796cbf", pct: "19%", monto: "₡142,000" },
-  { nombre: "Servicios", color: "#5d5294", pct: "13%", monto: "₡96,500" },
-  { nombre: "Transporte", color: "#423a6a", pct: "9%", monto: "₡71,300" },
+type Formato = "csv" | "xlsx" | "pdf";
+
+const FORMATOS: { id: Formato; etiqueta: string; descripcion: string; icono: React.ElementType }[] = [
+  { id: "csv", etiqueta: "CSV", descripcion: "Detalle de movimientos, uno por fila", icono: FileCsv },
+  { id: "xlsx", etiqueta: "Excel", descripcion: "Lo mismo, en una hoja de cálculo", icono: FileXls },
+  { id: "pdf", etiqueta: "PDF", descripcion: "Reporte de una página del mes más reciente", icono: FilePdf },
 ];
 
-export function Reportes() {
-  const [bloques, setBloques] = useState<Record<string, boolean>>({
-    resumen: true,
-    categorias: true,
-    comercios: true,
-    presupuestos: true,
-    movimientos: false,
-  });
-  const [formato, setFormato] = useState("PDF");
-  const [generado, setGenerado] = useState(false);
+export function Reportes({ usuarioId, onIrAConectar }: { usuarioId: number; onIrAConectar: () => void }) {
+  const { cargando, cuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
+  const [descargando, setDescargando] = useState<Formato | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function descargar(formato: Formato) {
+    if (!cuentaActiva) return;
+    setDescargando(formato);
+    setError(null);
+    try {
+      if (formato === "csv") await api.descargarMovimientosCsv(usuarioId, cuentaActiva.id);
+      if (formato === "xlsx") await api.descargarMovimientosExcel(usuarioId, cuentaActiva.id);
+      if (formato === "pdf") await api.descargarResumenPdf(usuarioId, cuentaActiva.id);
+    } catch (e) {
+      setError(mensajeDeError(e));
+    } finally {
+      setDescargando(null);
+    }
+  }
+
+  if (errorCuenta) {
+    return <p className="mensaje-error">{errorCuenta}</p>;
+  }
+  if (cargando) {
+    return <p className="vacio">Cargando…</p>;
+  }
+  if (!cuentaActiva) {
+    return (
+      <div className="card stack" style={{ maxWidth: 480 }}>
+        <div className="section-title">Todavía no hay ningún buzón vinculado</div>
+        <p className="section-subtitle" style={{ margin: 0 }}>
+          Vinculá Outlook o Gmail para exportar tus comprobantes reales.
+        </p>
+        <button className="btn btn-primary" style={{ alignSelf: "flex-start" }} onClick={onIrAConectar}>
+          <EnvelopeSimple size={14} /> Conectar correo
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="stack">
-      <MuestraBadge>
-        Datos de ejemplo — la exportación a PDF/CSV/Excel todavía no está implementada; esta
-        pantalla muestra cómo se armaría un reporte, no genera un archivo real todavía.
-      </MuestraBadge>
+    <div className="stack" style={{ maxWidth: 720 }}>
+      {error && <p className="mensaje-error">{error}</p>}
 
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 17, alignItems: "start" }}>
-        <section className="card stack">
-          <div className="section-title">Armar reporte</div>
-          <div className="stack" style={{ gap: 7 }}>
-            {Object.entries(BLOQUES).map(([clave, etiqueta]) => {
-              const activo = bloques[clave];
-              const Icono = activo ? CheckSquare : Square;
-              return (
-                <button
-                  key={clave}
-                  onClick={() => {
-                    setBloques((b) => ({ ...b, [clave]: !b[clave] }));
-                    setGenerado(false);
-                  }}
-                  className="btn"
-                  style={{
-                    justifyContent: "flex-start",
-                    borderColor: activo ? "var(--color-accent-500)" : "var(--color-border)",
-                    color: activo ? "var(--color-accent-100)" : "var(--color-text-muted)",
-                  }}
-                >
-                  <Icono size={14} weight={activo ? "fill" : "regular"} />
-                  {etiqueta}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: "flex", gap: 7 }}>
-            {["PDF", "CSV", "Excel"].map((f) => (
+      <p className="section-subtitle" style={{ margin: 0 }}>
+        Cada descarga relee tu bandeja real de {cuentaActiva.direccion} en el momento -puede tardar
+        varios segundos con muchos comprobantes.
+      </p>
+
+      <div className="grid grid-3">
+        {FORMATOS.map((f) => {
+          const Icono = f.icono;
+          const activo = descargando === f.id;
+          return (
+            <div key={f.id} className="card stack" style={{ alignItems: "flex-start" }}>
+              <Icono size={22} color="var(--color-accent-200)" />
+              <div className="section-title">{f.etiqueta}</div>
+              <p className="section-subtitle" style={{ margin: 0 }}>{f.descripcion}</p>
               <button
-                key={f}
-                onClick={() => {
-                  setFormato(f);
-                  setGenerado(false);
-                }}
-                className="btn btn-sm"
-                style={{ flex: 1, justifyContent: "center", borderColor: formato === f ? "var(--color-accent-500)" : "var(--color-border)" }}
+                className="btn btn-primary"
+                style={{ marginTop: 6 }}
+                onClick={() => descargar(f.id)}
+                disabled={descargando !== null}
               >
-                {f}
+                {activo ? "Generando…" : `Descargar ${f.etiqueta}`}
               </button>
-            ))}
-          </div>
-          <button className="btn btn-primary" onClick={() => setGenerado(true)}>
-            {generado ? `Listo · ${formato} generado` : `Generar ${formato}`}
-          </button>
-        </section>
-
-        <section
-          style={{
-            border: "1px solid var(--color-border)",
-            borderRadius: 8,
-            background: "var(--color-surface-2)",
-            padding: 28,
-            minHeight: 440,
-          }}
-        >
-          <div
-            style={{
-              maxWidth: 560,
-              margin: "0 auto",
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 8,
-              padding: 28,
-              display: "flex",
-              flexDirection: "column",
-              gap: 17,
-            }}
-          >
-            <div>
-              <div className="kicker">Reporte de gastos</div>
-              <div style={{ fontSize: 20, fontWeight: 500, marginTop: 6 }}>Agosto 2026</div>
-              <div style={{ fontSize: 11, color: "var(--color-text-dim)", marginTop: 6 }}>1 banco · datos de ejemplo</div>
             </div>
-            <div style={{ height: 1, background: "linear-gradient(90deg, transparent, #3f424d 20%, #3f424d 80%, transparent)" }} />
-            <div className="grid grid-3">
-              <div>
-                <div style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>Gasto total</div>
-                <div style={{ fontSize: 17, fontWeight: 500, marginTop: 3 }}>₡743,100</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>Categorías</div>
-                <div style={{ fontSize: 17, fontWeight: 500, marginTop: 3 }}>5</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>Sobre presupuesto</div>
-                <div style={{ fontSize: 17, fontWeight: 500, marginTop: 3 }}>1</div>
-              </div>
-            </div>
-            {bloques.categorias && (
-              <div className="stack" style={{ gap: 8 }}>
-                {CATEGORIAS_MUESTRA.map((c) => (
-                  <div key={c.nombre} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: c.color }} />
-                    <span style={{ flex: 1, color: "var(--color-text-bright-muted)" }}>{c.nombre}</span>
-                    <span style={{ color: "var(--color-text-dim)" }}>{c.pct}</span>
-                    <span style={{ fontVariantNumeric: "tabular-nums", width: 80, textAlign: "right" }}>{c.monto}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ fontSize: 10.5, color: "var(--color-text-dimmer)", lineHeight: 1.6 }}>
-              Vista previa de ejemplo. El reporte real se armaría desde los comprobantes leídos de
-              Gmail y Outlook.
-            </div>
-          </div>
-        </section>
+          );
+        })}
       </div>
     </div>
   );

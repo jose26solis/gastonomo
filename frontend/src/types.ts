@@ -66,6 +66,54 @@ export interface ResumenFinanciero {
   por_mes: ResumenMensual[];
 }
 
+export interface Categoria {
+  id: number;
+  usuario_id: number;
+  nombre: string;
+  descripcion: string | null;
+  color_hex: string;
+  categoria_padre_id: number | null;
+  es_hoja: boolean;
+  activa: boolean;
+}
+
+export interface ComercioClasificado {
+  comercio_id: number;
+  nombre: string;
+  categoria_id: number | null;
+  categoria_nombre: string | null;
+  cantidad_transacciones: number;
+  total: string;
+  moneda: string;
+}
+
+export interface Presupuesto {
+  id: number;
+  usuario_id: number;
+  categoria_id: number;
+  anio: number;
+  mes: number;
+  moneda: string;
+  monto_limite: string;
+  umbral_alerta: number;
+}
+
+export type EstadoPresupuesto = "EN_RANGO" | "CERCA_DEL_LIMITE" | "EXCEDIDO";
+
+export interface EstadoDePresupuesto {
+  presupuesto_id: number;
+  categoria_id: number;
+  categoria_nombre: string;
+  anio: number;
+  mes: number;
+  moneda: string;
+  monto_limite: string;
+  monto_consumido: string;
+  umbral_alerta: number;
+  porcentaje_usado: number;
+  estado: EstadoPresupuesto;
+}
+
 export interface ErrorDeApi {
   detalle: string;
 }

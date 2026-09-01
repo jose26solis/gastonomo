@@ -1,69 +1,187 @@
-import { ForkKnife, GasPump, Lightning, ShoppingCart, Sparkle, Car as Taxi, TShirt } from "@phosphor-icons/react";
-import { MuestraBadge } from "../components/MuestraBadge";
+import { EnvelopeSimple, Plus, Sparkle } from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
+import { api, ErrorDeApiError } from "../api";
+import { formatearMonto } from "../lib/formato";
+import { useCuentaActiva } from "../lib/useCuentaActiva";
+import type { Categoria, ComercioClasificado } from "../types";
 
-const CATEGORIAS = [
-  { nombre: "Alimentación", icono: ForkKnife, monto: 234_400, movimientos: 22, color: "#b5abfc" },
-  { nombre: "Supermercado", icono: ShoppingCart, monto: 198_900, movimientos: 9, color: "#968ae0" },
-  { nombre: "Gasolina", icono: GasPump, monto: 142_000, movimientos: 6, color: "#796cbf" },
-  { nombre: "Servicios", icono: Lightning, monto: 96_500, movimientos: 4, color: "#5d5294" },
-  { nombre: "Transporte", icono: Taxi, monto: 71_300, movimientos: 11, color: "#423a6a" },
-  { nombre: "Ropa", icono: TShirt, monto: 43_200, movimientos: 2, color: "#7972a9" },
-];
+const PALETA = ["#2563EB", "#16A34A", "#D97706", "#DC2626", "#7C3AED", "#0891B2", "#DB2777"];
 
-const PENDIENTES = [
-  {
-    comercio: "PALI SANTA ANA",
-    fecha: "17 ago",
-    monto: "₡18,400",
-    sugerencia: "Supermercado",
-    confianza: 0.61,
-    razon: "El correo llegó sin detalle de línea; se clasificó por el nombre del comercio.",
-  },
-  {
-    comercio: "AUTOSTAR REPUESTOS",
-    fecha: "15 ago",
-    monto: "₡76,900",
-    sugerencia: "Transporte",
-    confianza: 0.54,
-    razon: "Podría ser mantenimiento del vehículo o una compra puntual de repuestos.",
-  },
-];
+function mensajeDeError(error: unknown): string {
+  return error instanceof ErrorDeApiError ? error.message : "Ocurrió un error inesperado.";
+}
 
-const totalCategorias = CATEGORIAS.reduce((suma, c) => suma + c.monto, 0);
-const maximo = CATEGORIAS[0].monto;
+export function Categorias({ usuarioId, onIrAConectar }: { usuarioId: number; onIrAConectar: () => void }) {
+  const { cargando: cargandoCuenta, cuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
+  const [categorias, setCategorias] = useState<Categoria[] | null>(null);
+  const [comercios, setComercios] = useState<ComercioClasificado[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [nuevaCategoria, setNuevaCategoria] = useState("");
+  const [creandoCategoria, setCreandoCategoria] = useState(false);
+  const [asignando, setAsignando] = useState<number | null>(null);
 
-export function Categorias() {
+  useEffect(() => {
+    api
+      .listarCategorias(usuarioId)
+      .then(setCategorias)
+      .catch((e: unknown) => setError(mensajeDeError(e)));
+  }, [usuarioId]);
+
+  useEffect(() => {
+    if (!cuentaActiva) return;
+    let cancelado = false;
+    // Reinicio deliberado antes de recargar: evita mostrar comercios
+    // obsoletos mientras el fetch para la nueva cuenta está en curso.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setComercios(null);
+    api
+      .listarComercios(usuarioId, cuentaActiva.id)
+      .then((c) => {
+        if (!cancelado) setComercios(c);
+      })
+      .catch((e: unknown) => {
+        if (!cancelado) setError(mensajeDeError(e));
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [usuarioId, cuentaActiva]);
+
+  async function crearCategoria() {
+    const nombre = nuevaCategoria.trim();
+    if (!nombre || !categorias) return;
+    setCreandoCategoria(true);
+    try {
+      const color = PALETA[categorias.length % PALETA.length];
+      const categoria = await api.crearCategoria(usuarioId, nombre, color);
+      setCategorias([...categorias, categoria]);
+      setNuevaCategoria("");
+    } catch (e) {
+      setError(mensajeDeError(e));
+    } finally {
+      setCreandoCategoria(false);
+    }
+  }
+
+  async function confirmarCategoria(comercio: ComercioClasificado, categoriaId: number) {
+    setAsignando(comercio.comercio_id);
+    try {
+      await api.asignarCategoriaComercio(usuarioId, comercio.comercio_id, categoriaId);
+      const categoria = categorias?.find((c) => c.id === categoriaId);
+      setComercios(
+        (actual) =>
+          actual?.map((c) =>
+            c.comercio_id === comercio.comercio_id
+              ? { ...c, categoria_id: categoriaId, categoria_nombre: categoria?.nombre ?? null }
+              : c,
+          ) ?? null,
+      );
+    } catch (e) {
+      setError(mensajeDeError(e));
+    } finally {
+      setAsignando(null);
+    }
+  }
+
+  const { porCategoria, pendientes } = useMemo(() => {
+    if (!comercios) return { porCategoria: [], pendientes: [] };
+    const acumulado = new Map<string, { nombre: string; total: number; movimientos: number }>();
+    const pend: ComercioClasificado[] = [];
+    for (const c of comercios) {
+      if (c.categoria_id === null || c.categoria_nombre === null) {
+        pend.push(c);
+        continue;
+      }
+      const clave = `${c.categoria_id}-${c.moneda}`;
+      const actual = acumulado.get(clave) ?? { nombre: c.categoria_nombre, total: 0, movimientos: 0 };
+      actual.total += Number(c.total);
+      actual.movimientos += c.cantidad_transacciones;
+      acumulado.set(clave, actual);
+    }
+    const lista = [...acumulado.values()].sort((a, b) => b.total - a.total);
+    return { porCategoria: lista, pendientes: pend.sort((a, b) => Number(b.total) - Number(a.total)) };
+  }, [comercios]);
+
+  const maximoCategoria = porCategoria[0]?.total ?? 1;
+
+  if (errorCuenta || error) {
+    return <p className="mensaje-error">{errorCuenta ?? error}</p>;
+  }
+
+  if (cargandoCuenta) {
+    return <p className="vacio">Cargando…</p>;
+  }
+
+  if (!cuentaActiva) {
+    return (
+      <div className="card stack" style={{ maxWidth: 480 }}>
+        <div className="section-title">Todavía no hay ningún buzón vinculado</div>
+        <p className="section-subtitle" style={{ margin: 0 }}>
+          Vinculá Outlook o Gmail para clasificar tus comercios reales por categoría.
+        </p>
+        <button className="btn btn-primary" style={{ alignSelf: "flex-start" }} onClick={onIrAConectar}>
+          <EnvelopeSimple size={14} /> Conectar correo
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="stack">
-      <MuestraBadge>
-        Datos de ejemplo — falta modelar la clasificación automática por categoría; hoy
-        Gastonomo lee comprobantes de BAC pero todavía no les asigna una `Categoria` del dominio.
-      </MuestraBadge>
-
       <div className="grid grid-2" style={{ alignItems: "start" }}>
         <section className="card">
           <div className="section-title">Categorías detectadas</div>
-          <div className="section-subtitle">El modelo leería el comercio y el monto del comprobante</div>
+          <div className="section-subtitle">Suma real de los comercios ya clasificados</div>
+
           <div className="stack" style={{ gap: 14, marginTop: 17 }}>
-            {CATEGORIAS.map((c) => {
-              const Icono = c.icono;
-              return (
-                <div key={c.nombre} className="stack" style={{ gap: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                    <Icono size={14} color="var(--color-accent-400)" />
-                    <span style={{ flex: 1, color: "var(--color-text-bright-muted)" }}>{c.nombre}</span>
-                    <span style={{ color: "var(--color-text-dim)", fontSize: 10.5 }}>{c.movimientos} mov.</span>
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>₡{c.monto.toLocaleString("en-US")}</span>
-                  </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ background: c.color, width: `${Math.round((c.monto / maximo) * 100)}%` }} />
-                  </div>
+            {comercios === null && <p className="vacio">Leyendo comercios de la bandeja real…</p>}
+            {comercios !== null && porCategoria.length === 0 && (
+              <p className="vacio">Todavía no clasificaste ningún comercio.</p>
+            )}
+            {porCategoria.map((c) => (
+              <div key={c.nombre} className="stack" style={{ gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                  <span style={{ flex: 1, color: "var(--color-text-bright-muted)" }}>{c.nombre}</span>
+                  <span style={{ color: "var(--color-text-dim)", fontSize: 10.5 }}>{c.movimientos} mov.</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatearMonto(c.total, "CRC")}</span>
                 </div>
-              );
-            })}
+                <div className="bar-track">
+                  <div
+                    className="bar-fill"
+                    style={{ background: "var(--color-accent-400)", width: `${Math.round((c.total / maximoCategoria) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{ marginTop: 14, fontSize: 11, color: "var(--color-text-dim)" }}>
-            Total del mes de muestra: ₡{totalCategorias.toLocaleString("en-US")}
+
+          <div style={{ borderTop: "1px solid var(--color-border)", marginTop: 17, paddingTop: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--color-text-dim)", marginBottom: 8 }}>
+              Nueva categoría
+            </div>
+            <div style={{ display: "flex", gap: 7 }}>
+              <input
+                value={nuevaCategoria}
+                onChange={(e) => setNuevaCategoria(e.target.value)}
+                placeholder="ej. Transporte"
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  background: "var(--color-surface-2)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: 8,
+                  color: "var(--color-text)",
+                  fontSize: 12,
+                }}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={crearCategoria}
+                disabled={!nuevaCategoria.trim() || creandoCategoria}
+              >
+                <Plus size={13} /> Crear
+              </button>
+            </div>
           </div>
         </section>
 
@@ -72,35 +190,86 @@ export function Categorias() {
             <Sparkle size={15} color="var(--color-accent-200)" />
             <div className="section-title">Por confirmar</div>
             <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--color-text-dim)" }}>
-              {PENDIENTES.length} pendientes
+              {pendientes.length} pendientes
             </span>
           </div>
-          <div style={{ fontSize: 11, color: "var(--color-text-dim)", marginTop: 6, lineHeight: 1.6 }}>
-            Movimientos donde la clasificación quedaría por debajo del umbral de confianza.
-          </div>
+          <div className="section-subtitle">Comercios reales sin categoría asignada todavía</div>
+
           <div className="stack" style={{ marginTop: 17 }}>
-            {PENDIENTES.map((p) => (
-              <div key={p.comercio} className="card stack" style={{ gap: 8 }}>
+            {comercios === null && <p className="vacio">Leyendo comercios de la bandeja real…</p>}
+            {comercios !== null && pendientes.length === 0 && (
+              <p className="vacio">Todo clasificado. Los comercios nuevos van a aparecer acá.</p>
+            )}
+            {pendientes.map((c) => (
+              <div key={c.comercio_id} className="card stack" style={{ gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontSize: 12.5 }}>{p.comercio}</span>
-                  <span style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>{p.fecha}</span>
-                  <span style={{ marginLeft: "auto", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>{p.monto}</span>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.5 }}>{p.razon}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span className="tag">{p.sugerencia}</span>
-                  <span style={{ fontSize: 10, color: "var(--color-text-dim)" }}>
-                    {Math.round(p.confianza * 100)}% de confianza
+                  <span style={{ fontSize: 12.5 }}>{c.nombre}</span>
+                  <span style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>
+                    {c.cantidad_transacciones} mov.
                   </span>
-                  <button className="btn btn-sm btn-primary" style={{ marginLeft: "auto" }} disabled>
-                    Confirmar
-                  </button>
+                  <span style={{ marginLeft: "auto", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                    {formatearMonto(Number(c.total), c.moneda)}
+                  </span>
                 </div>
+                <SelectorDeCategoria
+                  categorias={categorias ?? []}
+                  disabled={asignando === c.comercio_id}
+                  onConfirmar={(categoriaId) => confirmarCategoria(c, categoriaId)}
+                />
               </div>
             ))}
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function SelectorDeCategoria({
+  categorias,
+  disabled,
+  onConfirmar,
+}: {
+  categorias: Categoria[];
+  disabled: boolean;
+  onConfirmar: (categoriaId: number) => void;
+}) {
+  const hojas = categorias.filter((c) => c.es_hoja && c.activa);
+  const [seleccion, setSeleccion] = useState<string>("");
+
+  if (hojas.length === 0) {
+    return <p className="vacio">Creá una categoría primero para poder clasificar.</p>;
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 7 }}>
+      <select
+        value={seleccion}
+        onChange={(e) => setSeleccion(e.target.value)}
+        style={{
+          flex: 1,
+          padding: "6px 8px",
+          background: "var(--color-surface-2)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 8,
+          color: "var(--color-text)",
+          fontSize: 11.5,
+        }}
+      >
+        <option value="">Elegir categoría…</option>
+        {hojas.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.nombre}
+          </option>
+        ))}
+      </select>
+      <button
+        className="btn btn-sm btn-primary"
+        disabled={!seleccion || disabled}
+        onClick={() => onConfirmar(Number(seleccion))}
+      >
+        Confirmar
+      </button>
     </div>
   );
 }

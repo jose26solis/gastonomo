@@ -61,9 +61,15 @@ export function AppShell() {
               onIrAConectar={() => setPantalla("conectar")}
             />
           )}
-          {pantalla === "categorias" && <Categorias />}
-          {pantalla === "presupuestos" && <Presupuestos />}
-          {pantalla === "reportes" && <Reportes />}
+          {pantalla === "categorias" && (
+            <Categorias usuarioId={usuarioId} onIrAConectar={() => setPantalla("conectar")} />
+          )}
+          {pantalla === "presupuestos" && (
+            <Presupuestos usuarioId={usuarioId} onIrAConectar={() => setPantalla("conectar")} />
+          )}
+          {pantalla === "reportes" && (
+            <Reportes usuarioId={usuarioId} onIrAConectar={() => setPantalla("conectar")} />
+          )}
           {pantalla === "conectar" && <ConectarCorreo usuarioId={usuarioId} />}
           {pantalla === "bancos" && <Bancos />}
           {pantalla === "ajustes" && <Ajustes />}

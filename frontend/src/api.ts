@@ -7,11 +7,15 @@
  */
 
 import type {
+  Categoria,
+  ComercioClasificado,
   ComprobanteParseado,
   CuentaCorreo,
   ErrorDeApi,
+  EstadoDePresupuesto,
   IniciarVinculacionResponse,
   MensajeResumido,
+  Presupuesto,
   Proveedor,
   ResumenFinanciero,
 } from "./types";
@@ -41,6 +45,27 @@ async function peticion<T>(ruta: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return (await respuesta.json()) as T;
+}
+
+/** Descarga un archivo que el backend arma al vuelo (CSV/Excel/PDF), disparando el guardado del navegador. */
+async function descargarArchivo(ruta: string, nombreSugerido: string): Promise<void> {
+  const respuesta = await fetch(`${URL_BASE}${ruta}`);
+  if (!respuesta.ok) {
+    const cuerpo = (await respuesta.json().catch(() => null)) as ErrorDeApi | null;
+    throw new ErrorDeApiError(
+      cuerpo?.detalle ?? `La API respondió ${respuesta.status}`,
+      respuesta.status,
+    );
+  }
+  const blob = await respuesta.blob();
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = nombreSugerido;
+  document.body.appendChild(enlace);
+  enlace.click();
+  enlace.remove();
+  URL.revokeObjectURL(url);
 }
 
 const rutaProveedor: Record<Proveedor, string> = {
@@ -107,5 +132,115 @@ export const api = {
     return peticion(`/api/cuentas-correo/${cuentaId}?usuario_id=${usuarioId}`, {
       method: "DELETE",
     });
+  },
+
+  // ---- Categorías ----
+
+  listarCategorias(usuarioId: number): Promise<Categoria[]> {
+    return peticion(`/api/categorias?usuario_id=${usuarioId}`);
+  },
+
+  crearCategoria(usuarioId: number, nombre: string, colorHex: string): Promise<Categoria> {
+    return peticion("/api/categorias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario_id: usuarioId, nombre, color_hex: colorHex }),
+    });
+  },
+
+  // ---- Comercios ----
+
+  /**
+   * Lee la bandeja real, resuelve cada comercio en el catálogo y adjunta su
+   * categoría sugerida. Igual que `resumenFinanciero`, puede tardar varios
+   * segundos: relee toda la bandeja cada vez.
+   */
+  listarComercios(usuarioId: number, cuentaId: number, limite = 200): Promise<ComercioClasificado[]> {
+    const parametros = new URLSearchParams({ usuario_id: String(usuarioId), limite: String(limite) });
+    return peticion(`/api/cuentas-correo/${cuentaId}/comercios?${parametros.toString()}`);
+  },
+
+  asignarCategoriaComercio(
+    usuarioId: number,
+    comercioId: number,
+    categoriaId: number,
+  ): Promise<void> {
+    return peticion(`/api/comercios/${comercioId}/categoria`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario_id: usuarioId, categoria_id: categoriaId }),
+    });
+  },
+
+  // ---- Presupuestos ----
+
+  crearOActualizarPresupuesto(datos: {
+    usuarioId: number;
+    categoriaId: number;
+    anio: number;
+    mes: number;
+    moneda: string;
+    montoLimite: string;
+    umbralAlerta: number;
+  }): Promise<Presupuesto> {
+    return peticion("/api/presupuestos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario_id: datos.usuarioId,
+        categoria_id: datos.categoriaId,
+        anio: datos.anio,
+        mes: datos.mes,
+        moneda: datos.moneda,
+        monto_limite: datos.montoLimite,
+        umbral_alerta: datos.umbralAlerta,
+      }),
+    });
+  },
+
+  eliminarPresupuesto(usuarioId: number, presupuestoId: number): Promise<void> {
+    return peticion(`/api/presupuestos/${presupuestoId}?usuario_id=${usuarioId}`, {
+      method: "DELETE",
+    });
+  },
+
+  /** El límite comparado contra el gasto real ya clasificado del período -no solo el límite crudo. */
+  estadoDePresupuestos(
+    usuarioId: number,
+    cuentaId: number,
+    anio: number,
+    mes: number,
+    limite = 200,
+  ): Promise<EstadoDePresupuesto[]> {
+    const parametros = new URLSearchParams({
+      usuario_id: String(usuarioId),
+      anio: String(anio),
+      mes: String(mes),
+      limite: String(limite),
+    });
+    return peticion(`/api/cuentas-correo/${cuentaId}/presupuestos?${parametros.toString()}`);
+  },
+
+  // ---- Reportes ----
+
+  descargarMovimientosCsv(usuarioId: number, cuentaId: number): Promise<void> {
+    return descargarArchivo(
+      `/api/cuentas-correo/${cuentaId}/reportes/movimientos.csv?usuario_id=${usuarioId}`,
+      "gastonomo-movimientos.csv",
+    );
+  },
+
+  descargarMovimientosExcel(usuarioId: number, cuentaId: number): Promise<void> {
+    return descargarArchivo(
+      `/api/cuentas-correo/${cuentaId}/reportes/movimientos.xlsx?usuario_id=${usuarioId}`,
+      "gastonomo-movimientos.xlsx",
+    );
+  },
+
+  descargarResumenPdf(usuarioId: number, cuentaId: number): Promise<void> {
+    return descargarArchivo(
+      `/api/cuentas-correo/${cuentaId}/reportes/resumen.pdf?usuario_id=${usuarioId}`,
+      "gastonomo-reporte.pdf",
+    );
   },
 };
