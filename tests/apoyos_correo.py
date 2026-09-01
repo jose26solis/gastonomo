@@ -5,8 +5,17 @@ como una suite, es solo una pieza que las suites importan.
 """
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+from app.business.errors import ErrorDeProveedorExterno
 from app.business.services.correo.proveedor import MensajeResumido, TokensDeCorreo
+
+_CUERPOS_DE_MENSAJE = {
+    "1": (Path(__file__).parent / "fixtures" / "comprobante_bac_compra.txt").read_text(
+        encoding="utf-8"
+    ),
+    "2": "Aproveche nuestras ofertas de la semana en PriceSmart.",
+}
 
 
 class ProveedorDeCorreoFalso:
@@ -44,12 +53,34 @@ class ProveedorDeCorreoFalso:
     def obtener_direccion(self, token_acceso: str) -> str:
         return self.direccion
 
-    def listar_mensajes_recientes(self, token_acceso: str, limite: int) -> list[MensajeResumido]:
-        return [
+    def listar_mensajes_recientes(
+        self, token_acceso: str, limite: int, remitente_contiene: str | None = None
+    ) -> list[MensajeResumido]:
+        """Simula una bandeja con un correo de BAC y uno que no lo es.
+
+        El segundo mensaje existe para que las pruebas puedan comprobar que el
+        filtro de remitente de verdad descarta lo que no coincide, no solo que
+        el parametro se recibe.
+        """
+        mensajes = [
             MensajeResumido(
                 identificador="1",
                 remitente="NotificacionBAC@baccredomatic.cr",
                 asunto="Notificacion de transaccion",
                 recibido_en=datetime.now(UTC),
-            )
+            ),
+            MensajeResumido(
+                identificador="2",
+                remitente="promociones@pricesmart.com",
+                asunto="Ofertas de la semana",
+                recibido_en=datetime.now(UTC),
+            ),
         ]
+        if remitente_contiene:
+            mensajes = [m for m in mensajes if remitente_contiene.lower() in m.remitente.lower()]
+        return mensajes[:limite]
+
+    def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
+        if identificador not in _CUERPOS_DE_MENSAJE:
+            raise ErrorDeProveedorExterno(f"Mensaje {identificador} inexistente en la prueba.")
+        return _CUERPOS_DE_MENSAJE[identificador]

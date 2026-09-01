@@ -29,9 +29,11 @@ from app.business.services.cuenta_correo_service import VincularCuentaComando
 from app.data.models.enums import ProveedorCorreo
 from app.presentation.dependencies import ServicioDeCuentasCorreo
 from app.presentation.schemas import (
+    ComprobanteParseadoResponse,
     CuentaCorreoResponse,
     IniciarVinculacionResponse,
     MensajeResumidoResponse,
+    ResumenFinancieroResponse,
 )
 
 router = APIRouter(prefix="/api/cuentas-correo", tags=["cuentas-correo"])
@@ -139,6 +141,49 @@ def probar_conexion(
     """
     mensajes = servicio.probar_conexion(usuario_id, cuenta_id, limite)
     return [MensajeResumidoResponse(**vars(m)) for m in mensajes]
+
+
+@router.get(
+    "/{cuenta_id}/comprobante",
+    response_model=ComprobanteParseadoResponse,
+    summary="Leer y parsear el comprobante de un mensaje",
+)
+def leer_comprobante(
+    cuenta_id: int,
+    servicio: ServicioDeCuentasCorreo,
+    usuario_id: int = Query(gt=0),
+    mensaje_id: str = Query(min_length=1, description="Id de mensaje que devolvió /probar"),
+) -> ComprobanteParseadoResponse:
+    """Trae el cuerpo de un mensaje y lo pasa por el parser de BAC.
+
+    `mensaje_id` viaja como query param -no como parte de la ruta- porque los
+    identificadores de mensaje de Graph pueden traer `/` y otros caracteres
+    que romperían un segmento de URL.
+    """
+    comprobante = servicio.leer_comprobante(usuario_id, cuenta_id, mensaje_id)
+    return ComprobanteParseadoResponse.model_validate(comprobante)
+
+
+@router.get(
+    "/{cuenta_id}/resumen-financiero",
+    response_model=ResumenFinancieroResponse,
+    summary="Leer los comprobantes de BAC y sumarlos por mes",
+)
+def resumen_financiero(
+    cuenta_id: int,
+    servicio: ServicioDeCuentasCorreo,
+    usuario_id: int = Query(gt=0),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> ResumenFinancieroResponse:
+    """Trae y parsea los comprobantes de BAC de la bandeja, y los suma por mes.
+
+    Puede tardar varios segundos con una bandeja de varios años: cada
+    comprobante es una petición aparte al proveedor de correo, y todavía no
+    hay ninguna tabla donde esto quede guardado entre una llamada y la
+    siguiente.
+    """
+    resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
+    return ResumenFinancieroResponse.model_validate(resumen)
 
 
 @router.delete("/{cuenta_id}", status_code=204, summary="Desvincular un buzón")

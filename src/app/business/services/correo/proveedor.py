@@ -51,6 +51,22 @@ class ProveedorDeCorreo(Protocol):
         """Resuelve la dirección del buzón que autorizó, para identificar la cuenta."""
         ...
 
-    def listar_mensajes_recientes(self, token_acceso: str, limite: int) -> list[MensajeResumido]:
-        """Trae los mensajes más recientes. Sirve para confirmar que el token funciona."""
+    def listar_mensajes_recientes(
+        self, token_acceso: str, limite: int, remitente_contiene: str | None = None
+    ) -> list[MensajeResumido]:
+        """Trae los mensajes más recientes, opcionalmente solo de un remitente.
+
+        `remitente_contiene` filtra por una subcadena de la dirección del
+        remitente (por ejemplo `"baccredomatic.cr"`). Sin ese filtro, trae
+        cualquier mensaje reciente; con él, ninguno que no coincida.
+        """
+        ...
+
+    def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
+        """Trae el cuerpo de un mensaje como texto plano, listo para parsear.
+
+        Nunca HTML: cada proveedor es responsable de pedirlo o convertirlo a
+        texto plano de su lado, para que `comprobante_bac.py` -que espera
+        líneas `Etiqueta: valor`- nunca tenga que lidiar con etiquetas HTML.
+        """
         ...

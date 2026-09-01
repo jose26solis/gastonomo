@@ -40,7 +40,11 @@ def _google_simulado(peticion: httpx.Request) -> httpx.Response:
     if peticion.url.path == "/oauth2/v2/userinfo":
         return httpx.Response(200, json={"email": "titular@gmail.com"})
     if peticion.url.path == "/gmail/v1/users/me/messages":
-        return httpx.Response(200, json={"messages": [{"id": "msg-1"}]})
+        # Simula el filtrado server-side real de Gmail: si viene "q", solo
+        # devuelve el id del mensaje de BAC; sin "q", devuelve los dos.
+        if "q" in peticion.url.params:
+            return httpx.Response(200, json={"messages": [{"id": "msg-1"}]})
+        return httpx.Response(200, json={"messages": [{"id": "msg-1"}, {"id": "msg-2"}]})
     if peticion.url.path == "/gmail/v1/users/me/messages/msg-1":
         return httpx.Response(
             200,
@@ -52,6 +56,52 @@ def _google_simulado(peticion: httpx.Request) -> httpx.Response:
                         {"name": "From", "value": "NotificacionBAC@baccredomatic.cr"},
                     ]
                 },
+            },
+        )
+    if peticion.url.path == "/gmail/v1/users/me/messages/msg-2":
+        return httpx.Response(
+            200,
+            json={
+                "internalDate": "1788160000000",
+                "payload": {
+                    "headers": [
+                        {"name": "Subject", "value": "Ofertas de la semana"},
+                        {"name": "From", "value": "promociones@pricesmart.com"},
+                    ]
+                },
+            },
+        )
+    if peticion.url.path == "/gmail/v1/users/me/messages/msg-anidado":
+        # Un multipart/alternative con la parte de texto anidada un nivel
+        # adentro (multipart/related), como mandan varios clientes de correo.
+        return httpx.Response(
+            200,
+            json={
+                "payload": {
+                    "mimeType": "multipart/alternative",
+                    "parts": [
+                        {
+                            "mimeType": "multipart/related",
+                            "parts": [
+                                {
+                                    "mimeType": "text/plain",
+                                    "body": {"data": "Q29tZXJjaW86IFdBTE1BUlQK"},
+                                },
+                            ],
+                        },
+                        {"mimeType": "text/html", "body": {"data": "PGRpdj5IVE1MPC9kaXY-"}},
+                    ],
+                }
+            },
+        )
+    if peticion.url.path == "/gmail/v1/users/me/messages/msg-solo-html":
+        return httpx.Response(
+            200,
+            json={
+                "payload": {
+                    "mimeType": "text/html",
+                    "body": {"data": "PGRpdj5TaW4gdGV4dG8gcGxhbm88L2Rpdj4-"},
+                }
             },
         )
     raise AssertionError(f"peticion inesperada en la prueba: {peticion.method} {peticion.url}")
@@ -90,11 +140,46 @@ def test_obtiene_la_direccion_del_perfil(proveedor: GmailProveedor) -> None:
 def test_lista_los_mensajes_recientes_resolviendo_cada_uno(proveedor: GmailProveedor) -> None:
     mensajes = proveedor.listar_mensajes_recientes("token", limite=5)
 
-    assert len(mensajes) == 1
+    assert len(mensajes) == 2
     assert mensajes[0].identificador == "msg-1"
     assert mensajes[0].remitente == "NotificacionBAC@baccredomatic.cr"
     assert mensajes[0].asunto == "Notificacion de transaccion WALMART"
     assert mensajes[0].recibido_en is not None
+
+
+def test_el_filtro_de_remitente_se_manda_como_query_de_gmail(proveedor: GmailProveedor) -> None:
+    mensajes = proveedor.listar_mensajes_recientes(
+        "token", limite=5, remitente_contiene="baccredomatic.cr"
+    )
+
+    assert len(mensajes) == 1
+    assert mensajes[0].remitente == "NotificacionBAC@baccredomatic.cr"
+
+
+def test_sin_filtro_no_se_manda_el_parametro_q() -> None:
+    peticiones: list[httpx.Request] = []
+
+    def espia(peticion: httpx.Request) -> httpx.Response:
+        peticiones.append(peticion)
+        return _google_simulado(peticion)
+
+    proveedor = GmailProveedor(httpx.Client(transport=httpx.MockTransport(espia)), _configuracion())
+    proveedor.listar_mensajes_recientes("token", limite=5)
+
+    peticion_de_listado = next(p for p in peticiones if p.url.path == "/gmail/v1/users/me/messages")
+    assert "q" not in peticion_de_listado.url.params
+
+
+def test_obtiene_el_cuerpo_de_texto_plano_aunque_venga_anidado(proveedor: GmailProveedor) -> None:
+    """La parte de texto vive dos niveles adentro: alternative -> related -> text/plain."""
+    cuerpo = proveedor.obtener_cuerpo_de_mensaje("token", "msg-anidado")
+
+    assert cuerpo == "Comercio: WALMART\n"
+
+
+def test_falla_si_el_mensaje_no_trae_texto_plano(proveedor: GmailProveedor) -> None:
+    with pytest.raises(ErrorDeProveedorExterno):
+        proveedor.obtener_cuerpo_de_mensaje("token", "msg-solo-html")
 
 
 def test_refrescar_conserva_el_token_de_refresco_si_google_no_lo_reenvia() -> None:

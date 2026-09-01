@@ -87,6 +87,47 @@ def test_probar_conexion_devuelve_los_mensajes(
     assert mensajes[0]["remitente"] == "NotificacionBAC@baccredomatic.cr"
 
 
+def test_resumen_financiero_devuelve_comprobantes_y_totales(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    estado = _codificar_estado(usuario.id)
+    vinculada = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    ).json()
+
+    respuesta = cliente_con_correo_falso.get(
+        f"/api/cuentas-correo/{vinculada['id']}/resumen-financiero",
+        params={"usuario_id": usuario.id},
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert len(cuerpo["comprobantes"]) == 1
+    assert len(cuerpo["por_mes"]) == 1
+    assert cuerpo["por_mes"][0]["total"] == "7870.00"
+
+
+def test_leer_comprobante_devuelve_los_campos_parseados(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    estado = _codificar_estado(usuario.id)
+    vinculada = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    ).json()
+
+    respuesta = cliente_con_correo_falso.get(
+        f"/api/cuentas-correo/{vinculada['id']}/comprobante",
+        params={"usuario_id": usuario.id, "mensaje_id": "1"},
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["banco"] == "BAC Credomatic"
+    assert cuerpo["comercio"] == "WALMART SAN SEBASTIAN"
+    assert cuerpo["es_compra"] is True
+    assert cuerpo["es_confiable"] is True
+
+
 def test_desvincular_devuelve_204_y_ya_no_aparece_en_el_listado(
     cliente_con_correo_falso: TestClient, usuario: Usuario
 ) -> None:

@@ -3,9 +3,15 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from app.business.errors import RecursoNoEncontrado, ReglaDeNegocioViolada
+from app.business.errors import ErrorDeProveedorExterno, RecursoNoEncontrado, ReglaDeNegocioViolada
+from app.business.parsers.comprobante_bac import (
+    DOMINIO_REMITENTE_BAC,
+    ComprobanteParseado,
+    parsear_comprobante_bac,
+)
 from app.business.seguridad.cifrado import cifrar, descifrar
 from app.business.services.correo.proveedor import MensajeResumido, ProveedorDeCorreo
+from app.business.services.resumen_service import ResumenFinanciero, agrupar_por_mes
 from app.data.models.cuenta_correo import CuentaCorreo
 from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
@@ -91,12 +97,18 @@ class CuentaCorreoService:
         No descarga el cuerpo de ningún mensaje -solo remitente, asunto y
         fecha- porque esto es una prueba de conexión, no la ingesta real. La
         ingesta que sí lee y descarta el contenido es un proceso aparte.
+
+        Por ahora solo trae correos de BAC (`DOMINIO_REMITENTE_BAC`): es el
+        único banco cuyo formato ya sabe leer `comprobante_bac.py`, y mostrar
+        mensajes de otros remitentes solo agregaría ruido sin que el sistema
+        pueda hacer nada con ellos todavía. Cuando se sume el parser de otro
+        banco, este filtro tiene que dejar de ser un valor fijo.
         """
         cuenta = self._obtener_cuenta_del_titular(usuario_id, cuenta_id)
         token_acceso = self._token_acceso_vigente(cuenta)
         try:
             mensajes = self._proveedor(cuenta.proveedor).listar_mensajes_recientes(
-                token_acceso, limite
+                token_acceso, limite, remitente_contiene=DOMINIO_REMITENTE_BAC
             )
         except Exception:
             cuenta.estado = EstadoCuentaCorreo.ERROR
@@ -105,6 +117,57 @@ class CuentaCorreoService:
         cuenta.ultima_sincronizacion = datetime.now(UTC)
         self.cuentas.sesion.commit()
         return mensajes
+
+    def leer_comprobante(
+        self, usuario_id: int, cuenta_id: int, mensaje_id: str
+    ) -> ComprobanteParseado:
+        """Trae el cuerpo de un mensaje y lo pasa por el parser de BAC.
+
+        Es el primer eslabón real de la ingesta: confirma que se puede llegar
+        desde "un id de mensaje que devolvió `probar_conexion`" hasta "los
+        campos de una compra", sin todavía persistir nada. Guardar el
+        resultado como una `Compra` de verdad es el siguiente paso, cuando
+        existan esas entidades -por eso esto no marca la cuenta en `ERROR`
+        si un mensaje puntual falla: eso lo reservamos para cuando falla la
+        conexión completa, en `probar_conexion`.
+        """
+        cuenta = self._obtener_cuenta_del_titular(usuario_id, cuenta_id)
+        token_acceso = self._token_acceso_vigente(cuenta)
+        cuerpo = self._proveedor(cuenta.proveedor).obtener_cuerpo_de_mensaje(
+            token_acceso, mensaje_id
+        )
+        return parsear_comprobante_bac(cuerpo)
+
+    def resumen_financiero(
+        self, usuario_id: int, cuenta_id: int, limite: int = 200
+    ) -> ResumenFinanciero:
+        """Lee y parsea los comprobantes de BAC de la bandeja, y los suma por mes.
+
+        Cada comprobante es una petición aparte al proveedor de correo: con
+        una bandeja de varios años esto puede tardar varios segundos, no es
+        instantáneo. Todavía no existe una tabla de `Compra` donde esto quede
+        guardado, así que se recalcula desde cero en cada llamada.
+
+        Un mensaje puntual que no se puede leer (borrado entretanto, error
+        transitorio del proveedor) se descarta y no tira abajo el resto del
+        resumen -es la misma lógica que `leer_comprobante`, repetida N veces.
+        """
+        cuenta = self._obtener_cuenta_del_titular(usuario_id, cuenta_id)
+        token_acceso = self._token_acceso_vigente(cuenta)
+        proveedor = self._proveedor(cuenta.proveedor)
+        mensajes = proveedor.listar_mensajes_recientes(
+            token_acceso, limite, remitente_contiene=DOMINIO_REMITENTE_BAC
+        )
+
+        comprobantes = []
+        for mensaje in mensajes:
+            try:
+                cuerpo = proveedor.obtener_cuerpo_de_mensaje(token_acceso, mensaje.identificador)
+            except ErrorDeProveedorExterno:
+                continue
+            comprobantes.append(parsear_comprobante_bac(cuerpo))
+
+        return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
 
     def desvincular(self, usuario_id: int, cuenta_id: int) -> None:
         """Desvincula un buzón sin borrar la cuenta del titular.

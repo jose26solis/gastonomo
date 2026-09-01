@@ -7,11 +7,13 @@
  */
 
 import type {
+  ComprobanteParseado,
   CuentaCorreo,
   ErrorDeApi,
   IniciarVinculacionResponse,
   MensajeResumido,
   Proveedor,
+  ResumenFinanciero,
 } from "./types";
 
 const URL_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -72,6 +74,33 @@ export const api = {
 
   probarConexion(usuarioId: number, cuentaId: number): Promise<MensajeResumido[]> {
     return peticion(`/api/cuentas-correo/${cuentaId}/probar?usuario_id=${usuarioId}`);
+  },
+
+  leerComprobante(
+    usuarioId: number,
+    cuentaId: number,
+    mensajeId: string,
+  ): Promise<ComprobanteParseado> {
+    const parametros = new URLSearchParams({
+      usuario_id: String(usuarioId),
+      mensaje_id: mensajeId,
+    });
+    return peticion(`/api/cuentas-correo/${cuentaId}/comprobante?${parametros.toString()}`);
+  },
+
+  /**
+   * Lee y parsea todos los comprobantes de BAC de la bandeja, y los suma por mes.
+   *
+   * Puede tardar varios segundos: cada comprobante es una petición real al
+   * proveedor de correo. No hay un límite de tiempo especial en el fetch -el
+   * componente que llama esto debe mostrar un estado de carga mientras espera.
+   */
+  resumenFinanciero(usuarioId: number, cuentaId: number, limite = 200): Promise<ResumenFinanciero> {
+    const parametros = new URLSearchParams({
+      usuario_id: String(usuarioId),
+      limite: String(limite),
+    });
+    return peticion(`/api/cuentas-correo/${cuentaId}/resumen-financiero?${parametros.toString()}`);
   },
 
   desvincular(usuarioId: number, cuentaId: number): Promise<void> {

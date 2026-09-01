@@ -25,6 +25,11 @@ from decimal import Decimal
 
 CAMPOS_OBLIGATORIOS = ("comercio", "fecha", "ultimos_cuatro", "monto")
 
+# Dominio real desde el que BAC manda sus notificaciones (confirmado contra un
+# comprobante real: NotificacionBAC@baccredomatic.cr). Sirve para filtrar la
+# bandeja y traer solo estos correos, antes de intentar parsear nada.
+DOMINIO_REMITENTE_BAC = "baccredomatic.cr"
+
 # El comodin `.` ocupa el lugar de la tilde: cubre tanto el acento correcto como
 # el caracter de reemplazo que deja la impresion a PDF.
 _COMERCIO = re.compile(r"^Comercio:[ \t]*(.+)$", re.MULTILINE)

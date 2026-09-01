@@ -1,6 +1,7 @@
 """Reglas de negocio de la vinculación de correo, con un proveedor falso."""
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
@@ -118,6 +119,32 @@ def test_un_token_vencido_sin_refresco_marca_la_cuenta_expirada(
     assert cuenta.estado == EstadoCuentaCorreo.TOKEN_EXPIRADO
 
 
+def test_leer_comprobante_trae_el_cuerpo_y_lo_parsea(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    """El mensaje "1" del doble de prueba es la muestra real de BAC anonimizada."""
+    cuenta = _vincular(servicio, usuario)
+
+    comprobante = servicio.leer_comprobante(usuario.id, cuenta.id, "1")
+
+    assert comprobante.banco == "BAC Credomatic"
+    assert comprobante.comercio == "WALMART SAN SEBASTIAN"
+    assert comprobante.es_compra is True
+    assert comprobante.es_confiable is True
+
+
+def test_leer_comprobante_de_un_mensaje_que_no_es_de_bac(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    """El mensaje "2" es el señuelo de PriceSmart: sin los campos de BAC."""
+    cuenta = _vincular(servicio, usuario)
+
+    comprobante = servicio.leer_comprobante(usuario.id, cuenta.id, "2")
+
+    assert comprobante.confianza == 0.0
+    assert comprobante.es_confiable is False
+
+
 def test_desvincular_borra_los_tokens_y_cambia_el_estado(
     servicio: CuentaCorreoService, usuario: Usuario
 ) -> None:
@@ -128,6 +155,21 @@ def test_desvincular_borra_los_tokens_y_cambia_el_estado(
     assert cuenta.estado == EstadoCuentaCorreo.DESVINCULADA
     assert cuenta.token_acceso_cifrado is None
     assert cuenta.token_refresco_cifrado is None
+
+
+def test_resumen_financiero_lee_y_suma_solo_lo_de_bac(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    """El doble de prueba trae un correo de BAC y uno de PriceSmart; solo el de BAC suma."""
+    cuenta = _vincular(servicio, usuario)
+
+    resumen = servicio.resumen_financiero(usuario.id, cuenta.id)
+
+    assert len(resumen.comprobantes) == 1
+    assert resumen.comprobantes[0].comercio == "WALMART SAN SEBASTIAN"
+    assert len(resumen.por_mes) == 1
+    assert resumen.por_mes[0].total == Decimal("7870.00")
+    assert resumen.por_mes[0].cantidad_transacciones == 1
 
 
 def test_probar_conexion_en_una_cuenta_desvinculada_falla(

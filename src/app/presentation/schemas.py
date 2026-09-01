@@ -5,6 +5,7 @@ cambiar sin que el dominio se entere.
 """
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -82,3 +83,50 @@ class MensajeResumidoResponse(BaseModel):
     remitente: str
     asunto: str
     recibido_en: datetime | None
+
+
+class ComprobanteParseadoResponse(BaseModel):
+    """Lo que el parser de BAC logró leer del cuerpo de un mensaje.
+
+    Todavía no es una `Compra`: es la lectura cruda, previa a resolver el
+    comercio, emparejar el método de pago y persistir nada.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    banco: str
+    comercio: str | None
+    ciudad: str | None
+    pais: str | None
+    fecha: datetime | None
+    marca_tarjeta: str | None
+    ultimos_cuatro: str | None
+    autorizacion: str | None
+    referencia: str | None
+    tipo_transaccion: str | None
+    moneda: str | None
+    monto: Decimal | None
+    confianza: float
+    es_compra: bool
+    es_confiable: bool
+
+
+class ResumenMensualResponse(BaseModel):
+    """Total de compras de un mes, en una moneda."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    anio: int
+    mes: int
+    moneda: str
+    total: Decimal
+    cantidad_transacciones: int
+
+
+class ResumenFinancieroResponse(BaseModel):
+    """Los comprobantes de BAC leídos de la bandeja, y su suma por mes."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    comprobantes: list[ComprobanteParseadoResponse]
+    por_mes: list[ResumenMensualResponse]

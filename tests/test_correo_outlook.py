@@ -54,9 +54,20 @@ def _microsoft_simulado(peticion: httpx.Request) -> httpx.Response:
                         "subject": "Notificacion de transaccion WALMART",
                         "from": {"emailAddress": {"address": "NotificacionBAC@baccredomatic.cr"}},
                         "receivedDateTime": "2026-08-30T13:27:00Z",
-                    }
+                    },
+                    {
+                        "id": "xyz789",
+                        "subject": "Ofertas de la semana",
+                        "from": {"emailAddress": {"address": "promociones@pricesmart.com"}},
+                        "receivedDateTime": "2026-08-30T10:00:00Z",
+                    },
                 ]
             },
+        )
+    if peticion.url.path == "/v1.0/me/messages/abc123":
+        assert peticion.headers.get("Prefer") == 'outlook.body-content-type="text"'
+        return httpx.Response(
+            200, json={"body": {"contentType": "text", "content": "Comercio: WALMART\n"}}
         )
     raise AssertionError(f"peticion inesperada en la prueba: {peticion.method} {peticion.url}")
 
@@ -97,14 +108,91 @@ def test_obtiene_la_direccion_del_perfil(proveedor: OutlookProveedor) -> None:
     assert proveedor.obtener_direccion("token") == "titular@outlook.com"
 
 
-def test_lista_los_mensajes_recientes(proveedor: OutlookProveedor) -> None:
+def test_lista_los_mensajes_recientes_sin_filtro(proveedor: OutlookProveedor) -> None:
     mensajes = proveedor.listar_mensajes_recientes("token", limite=5)
 
-    assert len(mensajes) == 1
+    assert len(mensajes) == 2
     assert mensajes[0].identificador == "abc123"
     assert mensajes[0].remitente == "NotificacionBAC@baccredomatic.cr"
     assert mensajes[0].asunto == "Notificacion de transaccion WALMART"
     assert mensajes[0].recibido_en == datetime(2026, 8, 30, 13, 27, tzinfo=UTC)
+
+
+def test_lista_solo_los_mensajes_del_remitente_filtrado(proveedor: OutlookProveedor) -> None:
+    mensajes = proveedor.listar_mensajes_recientes(
+        "token", limite=5, remitente_contiene="baccredomatic.cr"
+    )
+
+    assert len(mensajes) == 1
+    assert mensajes[0].remitente == "NotificacionBAC@baccredomatic.cr"
+
+
+def test_el_filtro_de_remitente_no_distingue_mayusculas(proveedor: OutlookProveedor) -> None:
+    mensajes = proveedor.listar_mensajes_recientes(
+        "token", limite=5, remitente_contiene="BACCREDOMATIC.CR"
+    )
+
+    assert len(mensajes) == 1
+
+
+def test_el_limite_se_aplica_despues_de_filtrar(proveedor: OutlookProveedor) -> None:
+    """Con limite=1 y filtro, debe devolver 1 mensaje de BAC, no el primero sin filtrar."""
+    mensajes = proveedor.listar_mensajes_recientes(
+        "token", limite=1, remitente_contiene="baccredomatic.cr"
+    )
+
+    assert len(mensajes) == 1
+    assert mensajes[0].remitente == "NotificacionBAC@baccredomatic.cr"
+
+
+def test_con_filtro_se_manda_search_y_consistency_level() -> None:
+    """$search busca en toda la bandeja, no solo en los mensajes recientes.
+
+    Probado contra una bandeja real con 105 correos de un mismo remitente
+    repartidos en mas de dos anios: pedir un lote de recientes y filtrar en
+    Python -lo que hacia esta funcion antes- solo alcanzaba a encontrar los
+    de la ultima semana.
+    """
+    peticiones: list[httpx.Request] = []
+
+    def espia(peticion: httpx.Request) -> httpx.Response:
+        peticiones.append(peticion)
+        return _microsoft_simulado(peticion)
+
+    proveedor = OutlookProveedor(
+        httpx.Client(transport=httpx.MockTransport(espia)), _configuracion()
+    )
+    proveedor.listar_mensajes_recientes("token", limite=5, remitente_contiene="baccredomatic.cr")
+
+    peticion = next(p for p in peticiones if p.url.path == "/v1.0/me/messages")
+    assert peticion.url.params.get("$search") == '"from:baccredomatic.cr"'
+    assert peticion.headers.get("ConsistencyLevel") == "eventual"
+    assert "$orderby" not in peticion.url.params, "Graph no deja combinar $search con $orderby"
+
+
+def test_sin_filtro_no_se_manda_search_ni_consistency_level() -> None:
+    peticiones: list[httpx.Request] = []
+
+    def espia(peticion: httpx.Request) -> httpx.Response:
+        peticiones.append(peticion)
+        return _microsoft_simulado(peticion)
+
+    proveedor = OutlookProveedor(
+        httpx.Client(transport=httpx.MockTransport(espia)), _configuracion()
+    )
+    proveedor.listar_mensajes_recientes("token", limite=5)
+
+    peticion = next(p for p in peticiones if p.url.path == "/v1.0/me/messages")
+    assert "$search" not in peticion.url.params
+    assert "ConsistencyLevel" not in peticion.headers
+    assert peticion.url.params.get("$orderby") == "receivedDateTime desc"
+
+
+def test_obtiene_el_cuerpo_del_mensaje_en_texto_plano(proveedor: OutlookProveedor) -> None:
+    """El mock ya comprueba, dentro del handler, que viaja el header Prefer."""
+    cuerpo = proveedor.obtener_cuerpo_de_mensaje("token", "abc123")
+
+    assert cuerpo == "Comercio: WALMART\n"
 
 
 def test_un_perfil_sin_correo_falla_explicitamente() -> None:

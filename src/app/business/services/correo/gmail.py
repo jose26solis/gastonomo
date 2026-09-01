@@ -6,6 +6,7 @@ Google en vez del SDK, porque el flujo completo son cuatro peticiones simples.
 Referencia: https://developers.google.com/identity/protocols/oauth2/web-server
 """
 
+import base64
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
@@ -87,24 +88,72 @@ class GmailProveedor:
             raise ErrorDeProveedorExterno("Google no devolvio una direccion de correo.")
         return direccion
 
-    def listar_mensajes_recientes(self, token_acceso: str, limite: int) -> list[MensajeResumido]:
-        """Trae los últimos mensajes.
+    def listar_mensajes_recientes(
+        self, token_acceso: str, limite: int, remitente_contiene: str | None = None
+    ) -> list[MensajeResumido]:
+        """Trae los últimos mensajes, opcionalmente solo de un remitente.
 
         La API de Gmail entrega primero solo identificadores; el asunto y el
         remitente hay que pedirlos aparte por cada mensaje. Por eso esta llamada
         cuesta 1 + N peticiones y `limite` debe mantenerse chico -esto es para
         confirmar que el token funciona, no para sincronizar la bandeja.
+
+        El filtro de remitente sí se manda al servidor (parametro `q`, la misma
+        sintaxis de la barra de busqueda de Gmail): a diferencia de Outlook, acá
+        conviene, porque evita gastar las N peticiones de detalle en mensajes
+        que de todas formas se iban a descartar.
         """
+        parametros: dict[str, str | int] = {"maxResults": limite}
+        if remitente_contiene:
+            parametros["q"] = f"from:{remitente_contiene}"
         listado = self._cliente.get(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages",
             headers=self._encabezado(token_acceso),
-            params={"maxResults": limite},
+            params=parametros,
         )
         cuerpo = self._cuerpo_o_error(listado, "listando mensajes de Gmail")
         return [
             self._leer_mensaje(token_acceso, mensaje["id"])
             for mensaje in cuerpo.get("messages", [])
         ]
+
+    def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
+        respuesta = self._cliente.get(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{identificador}",
+            headers=self._encabezado(token_acceso),
+            params={"format": "full"},
+        )
+        cuerpo = self._cuerpo_o_error(
+            respuesta, f"leyendo el cuerpo del mensaje {identificador} de Gmail"
+        )
+        datos = self._buscar_parte_de_texto(cuerpo.get("payload", {}))
+        if datos is None:
+            raise ErrorDeProveedorExterno(
+                f"El mensaje {identificador} no trae una parte de texto plano legible."
+            )
+        return self._decodificar_base64url(datos)
+
+    def _buscar_parte_de_texto(self, parte: dict) -> str | None:
+        """Busca la parte `text/plain` del cuerpo, que puede venir anidada.
+
+        Un correo `multipart/alternative` trae el mismo contenido en texto y en
+        HTML como partes hermanas; se prefiere la de texto porque
+        `comprobante_bac.py` espera líneas `Etiqueta: valor`, no marcado HTML.
+        """
+        if parte.get("mimeType") == "text/plain" and parte.get("body", {}).get("data"):
+            return parte["body"]["data"]
+        for subparte in parte.get("parts", []):
+            encontrada = self._buscar_parte_de_texto(subparte)
+            if encontrada is not None:
+                return encontrada
+        return None
+
+    def _decodificar_base64url(self, datos: str) -> str:
+        # Gmail codifica el cuerpo en base64 "url-safe" (- y _ en vez de + y /),
+        # y a veces sin el relleno "=" al final; urlsafe_b64decode exige el
+        # relleno completo o falla.
+        relleno = "=" * (-len(datos) % 4)
+        return base64.urlsafe_b64decode(datos + relleno).decode("utf-8", errors="replace")
 
     def _leer_mensaje(self, token_acceso: str, identificador: str) -> MensajeResumido:
         respuesta = self._cliente.get(

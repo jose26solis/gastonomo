@@ -86,18 +86,63 @@ class OutlookProveedor:
             )
         return direccion
 
-    def listar_mensajes_recientes(self, token_acceso: str, limite: int) -> list[MensajeResumido]:
+    def listar_mensajes_recientes(
+        self, token_acceso: str, limite: int, remitente_contiene: str | None = None
+    ) -> list[MensajeResumido]:
+        # Con filtro se usa $search: filtra del lado del servidor sobre TODA
+        # la bandeja, no solo los mensajes mas recientes. La alternativa de
+        # pedir un lote de recientes y descartar en Python lo que no coincide
+        # -lo que hacia esta funcion antes- se probo contra una bandeja real
+        # con 105 correos de un remitente repartidos en mas de dos anios, y
+        # solo alcanzaba los de la ultima semana: con tanto correo de otros
+        # remitentes mezclado, ni 100 mensajes recientes cubren un mes.
+        #
+        # Graph exige el encabezado ConsistencyLevel para $search y no deja
+        # combinarlo con $orderby -el orden por fecha se aplica despues, en
+        # Python- por eso esta rama arma la peticion distinto a la que no
+        # tiene filtro.
+        encabezados = self._encabezado(token_acceso)
+        parametros: dict[str, str | int] = {"$select": "id,subject,from,receivedDateTime"}
+        if remitente_contiene:
+            parametros["$search"] = f'"from:{remitente_contiene}"'
+            parametros["$top"] = limite
+            encabezados["ConsistencyLevel"] = "eventual"
+        else:
+            parametros["$top"] = limite
+            parametros["$orderby"] = "receivedDateTime desc"
+
         respuesta = self._cliente.get(
             "https://graph.microsoft.com/v1.0/me/messages",
-            headers=self._encabezado(token_acceso),
-            params={
-                "$top": limite,
-                "$select": "id,subject,from,receivedDateTime",
-                "$orderby": "receivedDateTime desc",
-            },
+            headers=encabezados,
+            params=parametros,
         )
         cuerpo = self._cuerpo_o_error(respuesta, "listando mensajes de Outlook")
-        return [self._mensaje_desde_json(mensaje) for mensaje in cuerpo.get("value", [])]
+        mensajes = [self._mensaje_desde_json(mensaje) for mensaje in cuerpo.get("value", [])]
+        if remitente_contiene:
+            # $search es busqueda de texto, no una igualdad exacta; se
+            # reconfirma en Python que el remitente de verdad coincide, y se
+            # reordena por fecha porque Graph no deja pedir $orderby junto con
+            # $search (devuelve por relevancia).
+            mensajes = [m for m in mensajes if remitente_contiene.lower() in m.remitente.lower()]
+            mensajes.sort(
+                key=lambda m: m.recibido_en or datetime.min.replace(tzinfo=UTC), reverse=True
+            )
+        return mensajes[:limite]
+
+    def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
+        # El encabezado Prefer le pide a Graph que convierta el cuerpo a texto
+        # plano de su lado. Sin él, "body.content" viene en HTML -BAC manda
+        # sus notificaciones con una plantilla HTML- y comprobante_bac.py
+        # espera lineas "Etiqueta: valor", no etiquetas <div>/<p>.
+        encabezados = self._encabezado(token_acceso)
+        encabezados["Prefer"] = 'outlook.body-content-type="text"'
+        respuesta = self._cliente.get(
+            f"https://graph.microsoft.com/v1.0/me/messages/{identificador}",
+            headers=encabezados,
+            params={"$select": "body"},
+        )
+        cuerpo = self._cuerpo_o_error(respuesta, f"leyendo el mensaje {identificador} de Outlook")
+        return cuerpo.get("body", {}).get("content", "")
 
     @property
     def _url_autorizar(self) -> str:
