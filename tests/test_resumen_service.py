@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.business.parsers.comprobante_bac import ComprobanteParseado
-from app.business.services.resumen_service import agrupar_por_mes
+from app.business.services.resumen_service import agrupar_por_mes, filtrar_del_periodo
 
 
 def _comprobante(
@@ -120,3 +120,36 @@ def test_la_suma_es_exacta_con_decimales() -> None:
     resumen = agrupar_por_mes(comprobantes)
 
     assert resumen[0].total == Decimal("0.30")
+
+
+def test_filtrar_del_periodo_deja_solo_el_mes_pedido() -> None:
+    """Regresión: un presupuesto de setiembre no debe contar el gasto de agosto.
+
+    Este es exactamente el bug reportado: el endpoint de presupuestos le pasaba
+    la bandeja completa (todos los meses) a la clasificación por comercio, así
+    que el `monto_consumido` de cualquier mes terminaba siendo el gasto de
+    *toda* la historia en esa categoría, no el de ese mes puntual.
+    """
+    comprobantes = [
+        _comprobante(fecha=datetime(2026, 8, 30), monto=Decimal("7870.00")),
+        _comprobante(fecha=datetime(2026, 9, 5), monto=Decimal("1000.00")),
+    ]
+
+    del_agosto = filtrar_del_periodo(comprobantes, 2026, 8)
+    del_setiembre = filtrar_del_periodo(comprobantes, 2026, 9)
+    de_un_mes_sin_gasto = filtrar_del_periodo(comprobantes, 2026, 7)
+
+    assert [c.monto for c in del_agosto] == [Decimal("7870.00")]
+    assert [c.monto for c in del_setiembre] == [Decimal("1000.00")]
+    assert de_un_mes_sin_gasto == []
+
+
+def test_filtrar_del_periodo_tambien_descarta_lo_no_sumable() -> None:
+    """Mismo criterio que `agrupar_por_mes`: no compra, sin confianza o sin datos no cuenta."""
+    comprobantes = [
+        _comprobante(fecha=datetime(2026, 8, 1), tipo_transaccion="TRANSFERENCIA"),
+        _comprobante(fecha=datetime(2026, 8, 1), confianza=0.5),
+        _comprobante(fecha=datetime(2026, 8, 1), monto=None),
+    ]
+
+    assert filtrar_del_periodo(comprobantes, 2026, 8) == []

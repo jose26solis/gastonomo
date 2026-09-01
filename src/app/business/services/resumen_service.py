@@ -72,6 +72,24 @@ def agrupar_por_mes(comprobantes: list[ComprobanteParseado]) -> list[ResumenMens
     return resumen
 
 
+def filtrar_del_periodo(
+    comprobantes: list[ComprobanteParseado], anio: int, mes: int
+) -> list[ComprobanteParseado]:
+    """Deja solo los comprobantes de compra confiables de un año y mes puntual.
+
+    Se usa antes de clasificar por comercio para calcular presupuestos: un
+    presupuesto es de un período específico, así que lo que se compara contra
+    su límite tiene que ser el gasto de ese mismo período, no el de toda la
+    bandeja. Reutiliza el mismo criterio de "sumable" que `agrupar_por_mes`
+    para no contar dos veces lo que ese total tampoco cuenta.
+    """
+    return [
+        c
+        for c in comprobantes
+        if _es_sumable(c) and c.fecha is not None and c.fecha.year == anio and c.fecha.month == mes
+    ]
+
+
 def _es_sumable(comprobante: ComprobanteParseado) -> bool:
     return (
         comprobante.es_compra

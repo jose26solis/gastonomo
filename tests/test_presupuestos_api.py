@@ -129,6 +129,54 @@ def test_presupuestos_del_periodo_combina_limite_con_gasto_real(
     assert estados[0]["estado"] == "EXCEDIDO"
 
 
+def test_presupuestos_del_periodo_no_arrastra_gasto_de_otro_mes(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    """Regresión: el único comprobante real del doble de prueba es de agosto.
+
+    Un presupuesto de setiembre para la misma categoría no debe verlo -si lo
+    ve, es porque el endpoint volvió a pasar la bandeja completa sin filtrar
+    por período antes de clasificar, que es exactamente el bug reportado.
+    """
+    estado = _codificar_estado(usuario.id)
+    vinculada = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    ).json()
+    categoria_id = _crear_categoria(cliente_con_correo_falso, usuario.id, "Alimentación")
+
+    comercios = cliente_con_correo_falso.get(
+        f"/api/cuentas-correo/{vinculada['id']}/comercios", params={"usuario_id": usuario.id}
+    ).json()
+    comercio_id = comercios[0]["comercio_id"]
+    cliente_con_correo_falso.post(
+        f"/api/comercios/{comercio_id}/categoria",
+        json={"usuario_id": usuario.id, "categoria_id": categoria_id},
+    )
+
+    cliente_con_correo_falso.post(
+        "/api/presupuestos",
+        json={
+            "usuario_id": usuario.id,
+            "categoria_id": categoria_id,
+            "anio": 2026,
+            "mes": 9,
+            "moneda": "CRC",
+            "monto_limite": "5000.00",
+        },
+    )
+
+    respuesta = cliente_con_correo_falso.get(
+        f"/api/cuentas-correo/{vinculada['id']}/presupuestos",
+        params={"usuario_id": usuario.id, "anio": 2026, "mes": 9},
+    )
+
+    assert respuesta.status_code == 200
+    estados = respuesta.json()
+    assert len(estados) == 1
+    assert estados[0]["monto_consumido"] == "0"
+    assert estados[0]["estado"] == "EN_RANGO"
+
+
 def test_presupuestos_del_periodo_sin_ningun_presupuesto_devuelve_vacio(
     cliente_con_correo_falso: TestClient, usuario: Usuario
 ) -> None:

@@ -26,6 +26,7 @@ from fastapi import APIRouter, Query
 from app.business.errors import DatosInvalidos
 from app.business.seguridad.cifrado import TokenIlegible, cifrar, descifrar
 from app.business.services.cuenta_correo_service import VincularCuentaComando
+from app.business.services.resumen_service import filtrar_del_periodo
 from app.data.models.enums import ProveedorCorreo
 from app.presentation.dependencies import (
     ServicioDeComercios,
@@ -237,7 +238,8 @@ def presupuestos_del_periodo(
     hubo gasto reconocido ahí, o que lo que hubo no está clasificado.
     """
     resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
-    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, resumen.comprobantes)
+    comprobantes_del_periodo = filtrar_del_periodo(resumen.comprobantes, anio, mes)
+    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, comprobantes_del_periodo)
     estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes, clasificados)
     return [EstadoDePresupuestoResponse.model_validate(e) for e in estados]
 
