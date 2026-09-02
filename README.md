@@ -138,7 +138,7 @@ la parte del sistema que va más allá de lo que exige el Laboratorio 2:
 
 | Funcionalidad | Qué hace | Dónde está |
 |---|---|---|
-| Resumen financiero | Lee los comprobantes reales de BAC de un buzón vinculado y los suma por mes y moneda, sin mezclar monedas; se puede navegar a meses anteriores | [`resumen_service.py`](src/app/business/services/resumen_service.py) |
+| Resumen financiero | Combina los comprobantes reales de BAC de **todos** los buzones vinculados y los suma por mes y moneda, sin mezclar monedas; se puede navegar a meses anteriores, y cada movimiento muestra de qué buzón salió | [`resumen_service.py`](src/app/business/services/resumen_service.py) |
 | Comercios y categorías | Normaliza el nombre del comercio, sugiere su categoría según lo que ese usuario ya clasificó antes (por usuario, no global) y deja confirmar o corregir | [`comercio_service.py`](src/app/business/services/comercio_service.py) |
 | Presupuestos | Límite mensual por categoría; el consumo se calcula en vivo contra el gasto real de ese mismo período y esa misma moneda (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`), nunca se guarda como un número aparte | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
 | Reportes exportables | Movimientos en CSV y Excel, resumen del mes más reciente en PDF | [`reportes.py`](src/app/presentation/routers/reportes.py) |
@@ -196,16 +196,34 @@ igual de sencillo pero distinto:
    GASTONOMO_BCCR_TOKEN=<el token que te dio el BCCR>
    ```
 
-Sin estas dos variables, la aplicación sigue funcionando exactamente igual -el aviso de "también
-tuvo movimientos en $X" se sigue mostrando, simplemente sin el equivalente en colones al lado.
+**Sin suscribirse también funciona.** Si faltan esas variables, o si el BCCR no responde, el
+sistema cae a la [API de indicadores del Ministerio de
+Hacienda](https://api.hacienda.go.cr/indicadores/tc), que republica ese mismo tipo de cambio de
+referencia del BCCR en JSON, sin token ni suscripción. El respaldo solo cubre el día de hoy -ese
+endpoint no acepta fechas históricas-, así que para convertir a una fecha pasada sí hace falta la
+suscripción al BCCR.
 
-> **Nota de implementación:** el BCCR documenta sus parámetros por función ("código del
-> indicador", "correo electrónico"...), no publica los nombres literales que espera del lado HTTP.
-> Los que usa [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py) -
-> `tcIndicador`, `tcFechaInicio`, etc.- están confirmados contra una integración real ya en
-> producción; los de correo y token (`tcCorreo`, `tcToken`) siguen el mismo patrón de nombres pero
-> no se pudieron confirmar en vivo -el servicio del BCCR estaba caído al escribirse esto. Si da
-> error con credenciales reales ya puestas, es el primer lugar donde mirar.
+> **Por qué existe el respaldo:** al escribirse esto, todo el subsistema
+> `gee.bccr.fi.cr/Indicadores/` llevaba días devolviendo `HTTP 503` — incluida la página donde uno
+> se suscribe, así que ni siquiera se podía obtener el token. Sin el respaldo, la conversión de
+> moneda quedaba inservible por una caída ajena.
+
+Si las dos fuentes fallan, el aviso de "también tuvo movimientos en $X" se sigue mostrando,
+simplemente sin el equivalente en colones al lado: la conversión es un extra, nunca un requisito
+para ver el resto del panel.
+
+> **Nota de implementación:** los nombres de parámetro son `Indicador`, `FechaInicio`,
+> `FechaFinal`, `Nombre`, `SubNiveles`, `CorreoElectronico` y `Token`, tomados de la página de
+> ayuda que el propio ASMX genera para `ObtenerIndicadoresEconomicosXML` (la que documenta la
+> invocación por HTTP GET). **No** confundirlos con `tcIndicador`, `tcCorreo`, `tcToken` y
+> compañía, que abundan en documentación de terceros: esos son los nombres internos de la
+> implementación en VB.NET del BCCR, no los que acepta el lado HTTP. Los siete son obligatorios y
+> el BCCR responde `Nothing` -no un error- si falta alguno, así que un nombre mal escrito se
+> manifiesta como "no hay tipo de cambio" en vez de como un fallo claro;
+> [`test_tipo_cambio_service.py`](tests/test_tipo_cambio_service.py) los fija por eso.
+>
+> Invocado por GET, el método devuelve el XML de los indicadores **escapado dentro** de un
+> elemento `<string xmlns="http://ws.sdde.bccr.fi.cr">`, no como documento propio.
 
 ---
 
@@ -297,6 +315,10 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/cuentas-correo/outlook/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Outlook |
 | `GET` | `/api/cuentas-correo/gmail/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Gmail |
 | `GET` | `/api/cuentas-correo?usuario_id=1` | Lista los buzones vinculados de un usuario |
+| `GET` | `/api/cuentas-correo/resumen-financiero?usuario_id=1` | **Combina** todos los buzones activos y suma por mes; cada comprobante viene marcado con el buzón del que salió |
+| `GET` | `/api/cuentas-correo/comercios?usuario_id=1` | Clasifica los comercios de todos los buzones activos |
+| `GET` | `/api/cuentas-correo/presupuestos?usuario_id=1&anio=2026&mes=9` | Estado de los presupuestos contra el gasto real de todos los buzones activos |
+| `GET` | `/api/cuentas-correo/reportes/movimientos.csv?usuario_id=1` | Exporta a CSV los movimientos de todos los buzones activos (ídem `.xlsx` y `resumen.pdf`) |
 | `GET` | `/api/cuentas-correo/{id}/probar?usuario_id=1` | Trae los últimos mensajes, para confirmar que el token sirve |
 | `GET` | `/api/cuentas-correo/{id}/comprobante?usuario_id=1&mensaje_id=…` | Lee y parsea el comprobante de un mensaje puntual |
 | `GET` | `/api/cuentas-correo/{id}/resumen-financiero?usuario_id=1` | Sincroniza lo nuevo y suma por mes los comprobantes ya cacheados |
@@ -313,9 +335,11 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `DELETE` | `/api/presupuestos/{id}?usuario_id=1` | Elimina un presupuesto |
 | `GET` | `/api/tipo-cambio?fecha=2026-09-02` | Tipo de cambio de referencia del colón contra el dólar (BCCR) |
 
-Los tres primeros no necesitan nada extra. Todo lo que empieza con `/api/cuentas-correo/{id}/…`
-necesita un buzón ya vinculado con credenciales reales de Microsoft/Google — ver la sección
-**Vinculación de correo** más abajo. `/api/tipo-cambio` necesita la suscripción del Banco Central —
+Los tres primeros no necesitan nada extra. Todo lo que lee correo bajo `/api/cuentas-correo/…`
+necesita al menos un buzón ya vinculado con credenciales reales de Microsoft/Google — ver la
+sección **Vinculación de correo** más abajo. Las rutas con `{id}` operan sobre **un** buzón
+puntual; las que no lo llevan combinan todos los buzones activos del titular, que es lo que usa el
+frontend. `/api/tipo-cambio` necesita la suscripción del Banco Central —
 ver [Conversión de moneda](#conversión-de-moneda-banco-central-de-costa-rica) más arriba.
 
 ### 5. Correr las pruebas y el linter
@@ -540,13 +564,15 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
 Pendiente:
 
 - [ ] Conectar la aplicación a MongoDB para lo que corresponda al subdominio documental
-- [ ] Vinculación de Gmail en el frontend (el backend ya soporta el proveedor)
+- [x] Vinculación de Gmail en el frontend, de punta a punta contra una cuenta real de Google
 - [ ] Sumar otros bancos además de BAC, contra una notificación real de cada uno
 - [ ] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
 - [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
-- [ ] Pruebas automatizadas de frontend (el backend tiene 156 pruebas; el frontend, ninguna todavía)
-- [ ] Verificar en vivo la integración con el BCCR con una suscripción real -el servicio estaba
-      caído al implementarla; `tcCorreo`/`tcToken` son el nombre de parámetro más probable, no
-      confirmado en vivo (ver la nota en [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py))
+- [ ] Pruebas automatizadas de frontend (el backend tiene 167 pruebas; el frontend, ninguna todavía)
+- [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
+      está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
+      de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta
+      a punta: al escribirse esto el subsistema `gee.bccr.fi.cr/Indicadores/` llevaba días
+      devolviendo `HTTP 503` y no se pudo ni completar la suscripción

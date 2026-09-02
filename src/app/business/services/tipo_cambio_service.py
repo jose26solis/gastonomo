@@ -1,22 +1,40 @@
-"""Tipo de cambio de referencia (colones/dólares), vía el Banco Central de Costa Rica.
+"""Tipo de cambio de referencia (colones/dólares), del Banco Central de Costa Rica.
 
-Habla con el "Servicio Web de Indicadores Económicos" del BCCR
-(https://gee.bccr.fi.cr/Indicadores/Suscripciones/WS/wsindicadoreseconomicos.asmx),
-un servicio SOAP/ASMX clásico que también acepta invocación por HTTP GET.
-Igual que Outlook y Gmail hace falta una suscripción propia -acá no es
-OAuth2, es un correo y un token que el BCCR entrega al confirmar la
-suscripción, gratis y sin costo (ver GASTONOMO_BCCR_CORREO/TOKEN en
-`settings.py` y la sección de conversión de moneda del README).
+Hay dos caminos hasta el mismo dato oficial, y este servicio usa el que esté
+disponible:
 
-Nota de implementación: el BCCR describe sus parámetros por función en la
-documentación pública ("código del indicador", "correo electrónico"...),
-no publica los nombres literales que espera el lado HTTP. Los nombres
-usados acá -tcIndicador, tcFechaInicio, tcFechaFinal, tcNombre,
-tnSubNiveles- están confirmados contra una integración real en
-producción; tcCorreo y tcToken siguen el mismo patrón de nombres pero no
-se pudieron confirmar en vivo -el servicio del BCCR estaba caído al
-escribir esto. Si el BCCR devuelve un error de parámetro con credenciales
-reales ya configuradas, es el primer lugar donde mirar.
+1. **El BCCR directamente**, por su "Servicio Web de Indicadores Económicos"
+   (https://gee.bccr.fi.cr/Indicadores/Suscripciones/WS/wsindicadoreseconomicos.asmx),
+   un servicio SOAP/ASMX clásico que también acepta invocación por HTTP GET.
+   Igual que Outlook y Gmail hace falta una suscripción propia -acá no es
+   OAuth2, es un correo y un token que el BCCR entrega al confirmar la
+   suscripción, gratis (ver GASTONOMO_BCCR_CORREO/TOKEN en `settings.py` y la
+   sección de conversión de moneda del README).
+
+2. **El Ministerio de Hacienda** (https://api.hacienda.go.cr/indicadores/tc),
+   que republica ese mismo tipo de cambio de referencia del BCCR en JSON, sin
+   suscripción ni token. Es el respaldo, y solo sirve para el día de hoy: ese
+   endpoint no acepta fechas históricas.
+
+El respaldo no es un capricho: al escribirse esto, todo el subsistema
+`gee.bccr.fi.cr/Indicadores/` llevaba días devolviendo `HTTP 503` -incluida la
+página donde uno se suscribe, así que ni siquiera se podía sacar el token. Sin
+el respaldo, la conversión de moneda quedaba muerta por una caída ajena. Se
+prefiere el BCCR cuando hay credenciales y responde; Hacienda solo entra
+cuando el primero no está disponible.
+
+Los nombres de parámetro (`Indicador`, `FechaInicio`, `FechaFinal`,
+`Nombre`, `SubNiveles`, `CorreoElectronico`, `Token`) están tomados de la
+página de ayuda que el propio ASMX genera para el método, que documenta
+literalmente la invocación por HTTP GET. Conviene no confundirlos con
+`tcIndicador`, `tcCorreo`, `tcToken` y compañía, que circulan en
+documentación de terceros: esos son los nombres internos de la
+implementación en VB.NET del BCCR, no los que acepta el lado HTTP.
+
+Invocado por GET, el método no devuelve el XML de los indicadores
+directamente: lo envuelve como texto escapado dentro de un elemento
+`<string xmlns="http://ws.sdde.bccr.fi.cr">`. Por eso `_valor_mas_reciente`
+reintenta parseando el texto interno como un segundo documento.
 """
 
 from dataclasses import dataclass
@@ -33,6 +51,7 @@ _URL_SERVICIO = (
     "https://gee.bccr.fi.cr/Indicadores/Suscripciones/WS/wsindicadoreseconomicos.asmx"
     "/ObtenerIndicadoresEconomicosXML"
 )
+_URL_HACIENDA = "https://api.hacienda.go.cr/indicadores/tc"
 _INDICADOR_COMPRA = 317
 _INDICADOR_VENTA = 318
 _DIAS_DE_MARGEN = 7  # cubre un fin de semana largo o feriado sin dato publicado
@@ -65,45 +84,110 @@ class TipoCambioService:
 
     @property
     def configurado(self) -> bool:
-        """Si hay credenciales del BCCR -sin ellas, no tiene sentido intentar la llamada."""
+        """Si hay credenciales del BCCR -sin ellas solo queda el respaldo de Hacienda."""
         return bool(self._correo and self._token)
 
     def obtener(self, fecha: date | None = None) -> TipoDeCambio:
         """El tipo de cambio de referencia más reciente hasta la fecha pedida (hoy, por defecto).
 
-        Consulta un rango de `_DIAS_DE_MARGEN` días terminando en la fecha
-        pedida y se queda con el valor más reciente: el BCCR no publica
-        tipo de cambio los fines de semana ni los feriados, así que pedir
-        exactamente un sábado daría "Nothing" si se consultara un solo día.
+        Intenta primero el BCCR y cae a Hacienda si no está disponible. El
+        respaldo solo entra para el día de hoy: su endpoint no acepta fechas
+        históricas, y devolver el valor de hoy etiquetado con otra fecha sería
+        mentir sobre el dato.
+
+        Si los dos fallan, el error explica qué pasó con cada uno -son dos
+        causas muy distintas (falta suscribirse / el proveedor está caído) y
+        con un solo mensaje genérico no habría forma de saber cuál es.
         """
-        if not self.configurado:
-            raise ErrorDeProveedorExterno(
-                "El tipo de cambio no está configurado: falta GASTONOMO_BCCR_CORREO y/o "
-                "GASTONOMO_BCCR_TOKEN. Ver la sección de conversión de moneda del README "
-                "para suscribirse al servicio del Banco Central."
-            )
         fecha = fecha or date.today()
         if fecha in self._cache:
             return self._cache[fecha]
 
-        desde = fecha - timedelta(days=_DIAS_DE_MARGEN)
-        compra = self._ultimo_valor(_INDICADOR_COMPRA, desde, fecha)
-        venta = self._ultimo_valor(_INDICADOR_VENTA, desde, fecha)
-        resultado = TipoDeCambio(fecha=fecha, compra=compra, venta=venta)
+        resultado, motivos = self._consultar(fecha)
+        if resultado is None:
+            raise ErrorDeProveedorExterno(
+                "No se pudo obtener el tipo de cambio de referencia. " + " ".join(motivos)
+            )
         self._cache[fecha] = resultado
         return resultado
+
+    def _consultar(self, fecha: date) -> tuple[TipoDeCambio | None, list[str]]:
+        motivos: list[str] = []
+
+        if self.configurado:
+            try:
+                return self._del_banco_central(fecha), motivos
+            except ErrorDeProveedorExterno as error:
+                motivos.append(f"Banco Central: {error}")
+        else:
+            motivos.append(
+                "Banco Central: falta GASTONOMO_BCCR_CORREO y/o GASTONOMO_BCCR_TOKEN "
+                "(ver la sección de conversión de moneda del README para suscribirse)."
+            )
+
+        if fecha != date.today():
+            motivos.append(
+                "Hacienda: solo publica el tipo de cambio del día, no el de una fecha pasada."
+            )
+            return None, motivos
+
+        try:
+            return self._de_hacienda(), motivos
+        except ErrorDeProveedorExterno as error:
+            motivos.append(f"Hacienda: {error}")
+        return None, motivos
+
+    def _del_banco_central(self, fecha: date) -> TipoDeCambio:
+        """Consulta un rango de días y se queda con el valor más reciente.
+
+        El rango de `_DIAS_DE_MARGEN` días no es por gusto: el BCCR no publica
+        tipo de cambio los fines de semana ni los feriados, así que pedir
+        exactamente un sábado devolvería "Nothing".
+        """
+        desde = fecha - timedelta(days=_DIAS_DE_MARGEN)
+        return TipoDeCambio(
+            fecha=fecha,
+            compra=self._ultimo_valor(_INDICADOR_COMPRA, desde, fecha),
+            venta=self._ultimo_valor(_INDICADOR_VENTA, desde, fecha),
+        )
+
+    def _de_hacienda(self) -> TipoDeCambio:
+        """El mismo tipo de cambio de referencia, republicado por Hacienda en JSON.
+
+        La fecha que se devuelve es la que reporta Hacienda, no la que se
+        pidió: un lunes temprano puede seguir publicando el valor del viernes,
+        y quien muestre el dato tiene que poder decir de qué día es.
+        """
+        respuesta = self._cliente.get(_URL_HACIENDA)
+        if respuesta.status_code >= 400:
+            raise ErrorDeProveedorExterno(
+                f"respondió HTTP {respuesta.status_code}: {respuesta.text[:200]}"
+            )
+        try:
+            dolar = respuesta.json()["dolar"]
+            return TipoDeCambio(
+                fecha=date.fromisoformat(str(dolar["venta"]["fecha"])[:10]),
+                compra=Decimal(str(dolar["compra"]["valor"])),
+                venta=Decimal(str(dolar["venta"]["valor"])),
+            )
+        except (ValueError, KeyError, TypeError, InvalidOperation) as error:
+            raise ErrorDeProveedorExterno(
+                f"devolvió una respuesta que no se pudo interpretar ({error})."
+            ) from error
 
     def _ultimo_valor(self, indicador: int, desde: date, hasta: date) -> Decimal:
         respuesta = self._cliente.get(
             _URL_SERVICIO,
             params={
-                "tcIndicador": indicador,
-                "tcFechaInicio": desde.strftime("%d/%m/%Y"),
-                "tcFechaFinal": hasta.strftime("%d/%m/%Y"),
-                "tcNombre": "Gastonomo",
-                "tnSubNiveles": "N",
-                "tcCorreo": self._correo,
-                "tcToken": self._token,
+                "Indicador": indicador,
+                "FechaInicio": desde.strftime("%d/%m/%Y"),
+                "FechaFinal": hasta.strftime("%d/%m/%Y"),
+                "Nombre": "Gastonomo",
+                # "N": sin subniveles. El tipo de cambio no los tiene, y
+                # pedirlos traería filas de desglose que acá no sirven.
+                "SubNiveles": "N",
+                "CorreoElectronico": self._correo,
+                "Token": self._token,
             },
         )
         if respuesta.status_code >= 400:
