@@ -4,7 +4,7 @@ Viven en presentacion, no en negocio: describen el contrato HTTP y pueden
 cambiar sin que el dominio se entere.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -151,6 +151,16 @@ class ResultadoDeSincronizacionResponse(BaseModel):
     comprobantes_nuevos: int
     comprobantes_totales: int
     sincronizado_en: datetime
+
+
+class TipoDeCambioResponse(BaseModel):
+    """Tipo de cambio de referencia del colón contra el dólar, del Banco Central."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fecha: date
+    compra: Decimal
+    venta: Decimal
 
 
 class ComercioResponse(BaseModel):

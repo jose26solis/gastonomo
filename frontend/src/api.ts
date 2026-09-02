@@ -18,6 +18,7 @@ import type {
   Presupuesto,
   Proveedor,
   ResumenFinanciero,
+  TipoDeCambio,
 } from "./types";
 
 const URL_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -242,5 +243,14 @@ export const api = {
       `/api/cuentas-correo/${cuentaId}/reportes/resumen.pdf?usuario_id=${usuarioId}`,
       "gastonomo-reporte.pdf",
     );
+  },
+
+  // ---- Tipo de cambio ----
+
+  /** 502 si el Banco Central no está configurado o no respondió -es normal que falle
+   * mientras no haya una suscripción real; quien llama debe manejarlo como opcional. */
+  tipoDeCambio(fecha?: string): Promise<TipoDeCambio> {
+    const parametros = fecha ? `?fecha=${fecha}` : "";
+    return peticion(`/api/tipo-cambio${parametros}`);
   },
 };

@@ -117,3 +117,9 @@ export interface EstadoDePresupuesto {
 export interface ErrorDeApi {
   detalle: string;
 }
+
+export interface TipoDeCambio {
+  fecha: string;
+  compra: string;
+  venta: string;
+}

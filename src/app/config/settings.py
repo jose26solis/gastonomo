@@ -56,6 +56,16 @@ class Configuracion:
     # Origenes desde los que el frontend puede llamar a esta API (CORS).
     origenes_permitidos: list[str]
 
+    # Servicio Web de Indicadores Economicos del Banco Central de Costa Rica
+    # (tipo de cambio). A diferencia de Outlook/Gmail no es OAuth2: hay que
+    # suscribirse una sola vez en https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/ConsultaIndicadores
+    # con un correo, confirmar la suscripcion desde ese correo, y guardar el
+    # token que el BCCR genera. Sin estas dos variables, la conversion de
+    # moneda simplemente no aparece -el resto de la aplicacion sigue
+    # funcionando igual, como con Outlook/Gmail sin configurar.
+    bccr_correo: str
+    bccr_token: str
+
 
 @lru_cache
 def obtener_configuracion() -> Configuracion:
@@ -95,6 +105,8 @@ def obtener_configuracion() -> Configuracion:
         ),
         clave_cifrado_tokens=_obtener_clave_cifrado_tokens(),
         origenes_permitidos=_obtener_origenes_permitidos(),
+        bccr_correo=os.getenv("GASTONOMO_BCCR_CORREO", ""),
+        bccr_token=os.getenv("GASTONOMO_BCCR_TOKEN", ""),
     )
 
 

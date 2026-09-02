@@ -1,8 +1,14 @@
 import { ArrowDownRight, ArrowUpRight, EnvelopeSimple, Minus, Storefront } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ErrorDeApiError } from "../api";
 import { formatearFechaCorta, formatearMes, formatearMonto } from "../lib/formato";
-import type { ComprobanteParseado, CuentaCorreo, ResumenFinanciero, ResumenMensual } from "../types";
+import type {
+  ComprobanteParseado,
+  CuentaCorreo,
+  ResumenFinanciero,
+  ResumenMensual,
+  TipoDeCambio,
+} from "../types";
 
 const ACENTOS = ["#b5abfc", "#968ae0", "#796cbf", "#5d5294", "#423a6a", "#7972a9"];
 
@@ -48,6 +54,7 @@ export function Resumen({
   // null = "el más reciente" (comportamiento por defecto); se llena cuando
   // el titular elige explícitamente un mes anterior en el selector.
   const [periodoElegido, setPeriodoElegido] = useState<{ anio: number; mes: number } | null>(null);
+  const [tipoDeCambio, setTipoDeCambio] = useState<TipoDeCambio | null>(null);
 
   useEffect(() => {
     let cancelado = false;
@@ -212,6 +219,21 @@ export function Resumen({
     };
   }, [resumen, periodoElegido]);
 
+  const intentoTipoDeCambio = useRef(false);
+  useEffect(() => {
+    const necesitaConversion = datos?.otrasMonedasDelMes.some((m) => m.moneda === "USD") ?? false;
+    if (!necesitaConversion || intentoTipoDeCambio.current) return;
+    intentoTipoDeCambio.current = true;
+    api
+      .tipoDeCambio()
+      .then(setTipoDeCambio)
+      .catch(() => {
+        // El Banco Central no está configurado o no respondió: la
+        // conversión es un extra, no algo que deba impedir ver el resto
+        // del panel -se sigue mostrando el monto en dólares, sin más.
+      });
+  }, [datos]);
+
   if (error) {
     return <p className="mensaje-error">{error}</p>;
   }
@@ -307,10 +329,27 @@ export function Resumen({
         <p className="section-subtitle" style={{ margin: 0 }}>
           {formatearMes(datos.mesActual.anio, datos.mesActual.mes)} también tuvo movimientos en{" "}
           {datos.otrasMonedasDelMes
-            .map((m) => formatearMonto(Number(m.total), m.moneda))
+            .map((m) => {
+              const texto = formatearMonto(Number(m.total), m.moneda);
+              // Tipo "venta": es la referencia de cuántos colones costaría
+              // comprar esos dólares -la lectura natural para "cuánto me
+              // costó esto en colones" en un tracker de gastos.
+              if (m.moneda === "USD" && tipoDeCambio) {
+                const equivalente = Number(m.total) * Number(tipoDeCambio.venta);
+                return `${texto} (≈ ${formatearMonto(equivalente, "CRC")})`;
+              }
+              return texto;
+            })
             .join(" y ")}
           {" "}
           -no se suma acá arriba para no mezclar monedas, pero sí cuenta en Movimientos recientes.
+          {tipoDeCambio && (
+            <>
+              {" "}
+              Conversión de referencia: ₡{tipoDeCambio.venta} por dólar, tipo de cambio de venta del{" "}
+              {tipoDeCambio.fecha} según el Banco Central.
+            </>
+          )}
         </p>
       )}
 

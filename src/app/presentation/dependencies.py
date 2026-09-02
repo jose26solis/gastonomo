@@ -18,6 +18,7 @@ from app.business.services.correo.outlook import OutlookProveedor
 from app.business.services.correo.proveedor import ProveedorDeCorreo
 from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.business.services.presupuesto_service import PresupuestoService
+from app.business.services.tipo_cambio_service import TipoCambioService
 from app.config.cliente_http import obtener_cliente_http
 from app.config.database import obtener_sesion
 from app.config.settings import obtener_configuracion
@@ -95,3 +96,23 @@ def obtener_servicio_de_presupuestos(sesion: SesionDependencia) -> PresupuestoSe
 
 
 ServicioDePresupuestos = Annotated[PresupuestoService, Depends(obtener_servicio_de_presupuestos)]
+
+
+_servicio_de_tipo_cambio: TipoCambioService | None = None
+
+
+def obtener_servicio_de_tipo_cambio(cliente: ClienteHttpDependencia) -> TipoCambioService:
+    """Arma (una sola vez) el servicio de tipo de cambio, con su caché por fecha.
+
+    A diferencia de los demás servicios, este no depende de la sesion de
+    base de datos -no persiste nada por usuario- así que es el único que
+    conviene reutilizar entre peticiones en vez de armar de cero cada vez:
+    su caché en memoria solo sirve si sobrevive más de una petición.
+    """
+    global _servicio_de_tipo_cambio
+    if _servicio_de_tipo_cambio is None:
+        _servicio_de_tipo_cambio = TipoCambioService(cliente, obtener_configuracion())
+    return _servicio_de_tipo_cambio
+
+
+ServicioDeTipoCambio = Annotated[TipoCambioService, Depends(obtener_servicio_de_tipo_cambio)]

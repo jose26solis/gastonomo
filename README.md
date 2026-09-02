@@ -132,16 +132,17 @@ docker compose exec -T mongo mongosh --quiet -u gastonomo -p gastonomo_local --a
 
 ## Funcionalidades adelantadas: clasificación, presupuestos y reportes
 
-Todo esto corre hoy sobre la base SQLite del Laboratorio 1, contra correo real de BAC Credomatic
--no contra datos de ejemplo-, y es la parte del sistema que va más allá de lo que exige el
-Laboratorio 2:
+Todo esto corre contra correo real de BAC Credomatic -no contra datos de ejemplo-, sobre SQLite o
+sobre PostgreSQL (ver [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite)), y es
+la parte del sistema que va más allá de lo que exige el Laboratorio 2:
 
 | Funcionalidad | Qué hace | Dónde está |
 |---|---|---|
-| Resumen financiero | Lee los comprobantes reales de BAC de un buzón vinculado y los suma por mes y moneda, sin mezclar monedas | [`resumen_service.py`](src/app/business/services/resumen_service.py) |
+| Resumen financiero | Lee los comprobantes reales de BAC de un buzón vinculado y los suma por mes y moneda, sin mezclar monedas; se puede navegar a meses anteriores | [`resumen_service.py`](src/app/business/services/resumen_service.py) |
 | Comercios y categorías | Normaliza el nombre del comercio, sugiere su categoría según lo que ese usuario ya clasificó antes (por usuario, no global) y deja confirmar o corregir | [`comercio_service.py`](src/app/business/services/comercio_service.py) |
-| Presupuestos | Límite mensual por categoría; el consumo se calcula en vivo contra el gasto real de ese mismo período (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`), nunca se guarda como un número aparte | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
+| Presupuestos | Límite mensual por categoría; el consumo se calcula en vivo contra el gasto real de ese mismo período y esa misma moneda (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`), nunca se guarda como un número aparte | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
 | Reportes exportables | Movimientos en CSV y Excel, resumen del mes más reciente en PDF | [`reportes.py`](src/app/presentation/routers/reportes.py) |
+| Tipo de cambio de referencia | Equivalente aproximado en colones de un movimiento en dólares, vía el Banco Central -solo de referencia, nunca se suma a los totales | [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py) |
 | Frontend completo | Siete pantallas con datos reales o marcadas explícitamente como ejemplo | ver [Correr el frontend](#correr-el-frontend) |
 
 Dos decisiones de dominio que valen la pena explicar:
@@ -171,6 +172,40 @@ de nuevo.
 
 En números, contra un buzón real de ~113 comprobantes: primera carga (bandeja vacía) ~24s, carga
 siguiente (bandeja al día) menos de 1s.
+
+### Conversión de moneda (Banco Central de Costa Rica)
+
+El Resumen nunca mezcla monedas en sus totales -es una regla del dominio, no un detalle- pero un
+mes con gasto en colones **y** en dólares (un peaje y un viaje de Uber, por ejemplo) puede mostrar,
+aparte, cuánto valdrían esos dólares en colones. Es solo de referencia: el número que se suma en
+las tarjetas de arriba nunca cambia por esto.
+
+La fuente es el
+[Servicio Web de Indicadores Económicos](https://gee.bccr.fi.cr/Indicadores/Suscripciones/WS/wsindicadoreseconomicos.asmx)
+del Banco Central -el tipo de cambio de referencia oficial del país, gratis y sin necesidad de
+tarjeta ni pago. A diferencia de Outlook y Gmail no es OAuth2: hace falta suscribirse una vez,
+igual de sencillo pero distinto:
+
+1. Suscribirse en <https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/ConsultaIndicadores> con un
+   correo.
+2. Confirmar la suscripción desde el enlace que llega a ese correo.
+3. Copiar el token que el BCCR genera al `.env`:
+
+   ```bash
+   GASTONOMO_BCCR_CORREO=tu-correo@ejemplo.cr
+   GASTONOMO_BCCR_TOKEN=<el token que te dio el BCCR>
+   ```
+
+Sin estas dos variables, la aplicación sigue funcionando exactamente igual -el aviso de "también
+tuvo movimientos en $X" se sigue mostrando, simplemente sin el equivalente en colones al lado.
+
+> **Nota de implementación:** el BCCR documenta sus parámetros por función ("código del
+> indicador", "correo electrónico"...), no publica los nombres literales que espera del lado HTTP.
+> Los que usa [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py) -
+> `tcIndicador`, `tcFechaInicio`, etc.- están confirmados contra una integración real ya en
+> producción; los de correo y token (`tcCorreo`, `tcToken`) siguen el mismo patrón de nombres pero
+> no se pudieron confirmar en vivo -el servicio del BCCR estaba caído al escribirse esto. Si da
+> error con credenciales reales ya puestas, es el primer lugar donde mirar.
 
 ---
 
@@ -276,10 +311,12 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `POST` | `/api/presupuestos` | Crea o corrige el presupuesto de una categoría y período |
 | `GET` | `/api/presupuestos?usuario_id=1&anio=2026&mes=9` | Lista los presupuestos guardados de un período |
 | `DELETE` | `/api/presupuestos/{id}?usuario_id=1` | Elimina un presupuesto |
+| `GET` | `/api/tipo-cambio?fecha=2026-09-02` | Tipo de cambio de referencia del colón contra el dólar (BCCR) |
 
 Los tres primeros no necesitan nada extra. Todo lo que empieza con `/api/cuentas-correo/{id}/…`
 necesita un buzón ya vinculado con credenciales reales de Microsoft/Google — ver la sección
-**Vinculación de correo** más abajo.
+**Vinculación de correo** más abajo. `/api/tipo-cambio` necesita la suscripción del Banco Central —
+ver [Conversión de moneda](#conversión-de-moneda-banco-central-de-costa-rica) más arriba.
 
 ### 5. Correr las pruebas y el linter
 
@@ -489,6 +526,10 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
       la conecta al Postgres de `docker compose up -d` en vez de SQLite, con su propio esquema
       (Flyway, el del Laboratorio 2, queda detrás de un perfil aparte a propósito -no compiten por
       la misma base). Ver [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite).
+- [x] **Selector de mes en el Resumen** *(adelantado)* — antes solo mostraba el mes más reciente.
+- [x] **Conversión de moneda de referencia** *(adelantado)* — equivalente aproximado en colones de
+      un movimiento en dólares, vía el Banco Central. Ver
+      [Conversión de moneda](#conversión-de-moneda-banco-central-de-costa-rica).
 
 Pendiente:
 
@@ -499,4 +540,7 @@ Pendiente:
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
 - [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
-- [ ] Pruebas automatizadas de frontend (el backend tiene 136 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 156 pruebas; el frontend, ninguna todavía)
+- [ ] Verificar en vivo la integración con el BCCR con una suscripción real -el servicio estaba
+      caído al implementarla; `tcCorreo`/`tcToken` son el nombre de parámetro más probable, no
+      confirmado en vivo (ver la nota en [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py))

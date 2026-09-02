@@ -23,7 +23,8 @@ class ReglaDeNegocioViolada(ErrorDeNegocio):
 
 
 class ErrorDeProveedorExterno(ErrorDeNegocio):
-    """Un servicio externo (Microsoft, Google) rechazo la solicitud o no respondio.
+    """Un servicio externo (Microsoft, Google, el Banco Central) rechazo la solicitud, o no
+    respondio.
 
     No es un error de nuestras reglas: el dato pedido era correcto, pero el
     proveedor -el codigo de autorizacion vencio, el token se revoco, la red

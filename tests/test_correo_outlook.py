@@ -29,6 +29,8 @@ def _configuracion() -> Configuracion:
         google_redirect_uri="",
         clave_cifrado_tokens="clave-no-usada-en-estas-pruebas",
         origenes_permitidos=[],
+        bccr_correo="",
+        bccr_token="",
     )
 
 

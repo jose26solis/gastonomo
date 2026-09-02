@@ -28,6 +28,7 @@ from app.presentation.routers import (
     presupuestos,
     reportes,
     salud,
+    tipo_cambio,
 )
 
 configuracion = obtener_configuracion()
@@ -62,6 +63,7 @@ app.include_router(cuentas_correo.router)
 app.include_router(comercios.router)
 app.include_router(presupuestos.router)
 app.include_router(reportes.router)
+app.include_router(tipo_cambio.router)
 
 
 @app.exception_handler(DatosInvalidos)

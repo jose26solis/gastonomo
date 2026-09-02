@@ -24,6 +24,8 @@ def _configuracion() -> Configuracion:
         google_redirect_uri="http://localhost/api/cuentas-correo/gmail/callback",
         clave_cifrado_tokens="clave-no-usada-en-estas-pruebas",
         origenes_permitidos=[],
+        bccr_correo="",
+        bccr_token="",
     )
 
 
