@@ -93,9 +93,9 @@ export function ConectarCorreo({ usuarioId }: { usuarioId: number }) {
               <div style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                 {cuenta ? cuenta.direccion : "Ninguna cuenta vinculada"}
               </div>
-              {cuenta ? (
+              {cuenta && cuenta.estado !== "DESVINCULADA" ? (
                 <div style={{ display: "flex", gap: 7 }}>
-                  <button className="btn btn-sm" onClick={() => probarConexion(cuenta)} disabled={cuenta.estado === "DESVINCULADA"}>
+                  <button className="btn btn-sm" onClick={() => probarConexion(cuenta)}>
                     Probar conexión
                   </button>
                   <button className="btn btn-sm btn-danger" onClick={() => desvincular(cuenta)}>
@@ -109,7 +109,11 @@ export function ConectarCorreo({ usuarioId }: { usuarioId: number }) {
                   onClick={() => vincular(proveedor)}
                   disabled={vinculando !== null}
                 >
-                  {vinculando === proveedor ? "Redirigiendo…" : `Conectar ${NOMBRE_PROVEEDOR[proveedor]}`}
+                  {vinculando === proveedor
+                    ? "Redirigiendo…"
+                    : cuenta
+                      ? `Volver a conectar ${NOMBRE_PROVEEDOR[proveedor]}`
+                      : `Conectar ${NOMBRE_PROVEEDOR[proveedor]}`}
                 </button>
               )}
 
