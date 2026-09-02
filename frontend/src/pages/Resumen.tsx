@@ -2,7 +2,7 @@ import { ArrowDownRight, ArrowUpRight, EnvelopeSimple, Minus, Storefront } from 
 import { useEffect, useMemo, useState } from "react";
 import { api, ErrorDeApiError } from "../api";
 import { formatearFechaCorta, formatearMes, formatearMonto } from "../lib/formato";
-import type { ComprobanteParseado, CuentaCorreo, ResumenFinanciero } from "../types";
+import type { ComprobanteParseado, CuentaCorreo, ResumenFinanciero, ResumenMensual } from "../types";
 
 const ACENTOS = ["#b5abfc", "#968ae0", "#796cbf", "#5d5294", "#423a6a", "#7972a9"];
 
@@ -12,6 +12,20 @@ function esSumable(c: ComprobanteParseado): c is ComprobanteParseado & {
   monto: string;
 } {
   return c.es_compra && c.es_confiable && c.monto != null && c.fecha != null && c.moneda != null;
+}
+
+/** Un mismo mes puede traer una entrada por moneda -las monedas nunca se
+ * suman entre sí. Dentro de un período, prefiere colones (la moneda del
+ * resto de la app: los presupuestos, por ejemplo, solo se crean en CRC) y
+ * cae a la que haya si ese mes no tuvo ningún movimiento en colones.
+ */
+function entradaPreferidaDelPeriodo(
+  entradas: ResumenMensual[],
+  anio: number,
+  mes: number,
+): ResumenMensual {
+  const delPeriodo = entradas.filter((e) => e.anio === anio && e.mes === mes);
+  return delPeriodo.find((e) => e.moneda === "CRC") ?? delPeriodo[0];
 }
 
 function mensajeDeError(error: unknown): string {
@@ -88,8 +102,32 @@ export function Resumen({
   const datos = useMemo(() => {
     if (!resumen || resumen.por_mes.length === 0) return null;
 
-    const mesActual = resumen.por_mes[0];
-    const mesAnterior = resumen.por_mes[1] ?? null;
+    // resumen.por_mes viene ordenado por (año, mes, moneda) descendente, no
+    // por período: un mes con movimientos en dos monedas ocupa dos filas
+    // seguidas. Los períodos distintos, del más al menos reciente:
+    const periodos: { anio: number; mes: number }[] = [];
+    for (const entrada of resumen.por_mes) {
+      if (!periodos.some((p) => p.anio === entrada.anio && p.mes === entrada.mes)) {
+        periodos.push({ anio: entrada.anio, mes: entrada.mes });
+      }
+    }
+
+    const periodoActual = periodos[0];
+    const periodoAnterior = periodos[1] ?? null;
+    const mesActual = entradaPreferidaDelPeriodo(
+      resumen.por_mes,
+      periodoActual.anio,
+      periodoActual.mes,
+    );
+    const mesAnterior = periodoAnterior
+      ? entradaPreferidaDelPeriodo(resumen.por_mes, periodoAnterior.anio, periodoAnterior.mes)
+      : null;
+    // Otras monedas que también tuvieron movimiento este mes: la tarjeta de
+    // KPI solo puede mostrar un total en una moneda a la vez, así que esto
+    // se muestra aparte para que esa plata no desaparezca en silencio.
+    const otrasMonedasDelMes = resumen.por_mes.filter(
+      (e) => e.anio === periodoActual.anio && e.mes === periodoActual.mes && e !== mesActual,
+    );
     const prefijoMes = `${mesActual.anio}-${String(mesActual.mes).padStart(2, "0")}`;
 
     const comprobantesDelMes = resumen.comprobantes
@@ -135,10 +173,18 @@ export function Resumen({
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
       .slice(0, 8);
 
+    // Un punto por período, no por fila: dos monedas del mismo mes no pueden
+    // graficarse en una sola línea (las escalas no son comparables), así que
+    // la tendencia usa la misma moneda preferida que el resto del panel.
+    const tendencia = periodos
+      .map((p) => entradaPreferidaDelPeriodo(resumen.por_mes, p.anio, p.mes))
+      .reverse();
+
     return {
       mesActual,
       mesAnterior,
       mesAnteriorComparable,
+      otrasMonedasDelMes,
       totalMes,
       cantidadMes,
       promedioMes,
@@ -149,7 +195,7 @@ export function Resumen({
       primerDiaSemana,
       porDia,
       movimientosRecientes,
-      tendencia: [...resumen.por_mes].reverse(),
+      tendencia,
     };
   }, [resumen]);
 
@@ -214,6 +260,17 @@ export function Resumen({
         />
         <KpiCard label="Comercio más frecuente" valor={datos.comercioFrecuente} delta="Por monto acumulado" tendenciaDelta="neutral" />
       </div>
+
+      {datos.otrasMonedasDelMes.length > 0 && (
+        <p className="section-subtitle" style={{ margin: 0 }}>
+          {formatearMes(datos.mesActual.anio, datos.mesActual.mes)} también tuvo movimientos en{" "}
+          {datos.otrasMonedasDelMes
+            .map((m) => formatearMonto(Number(m.total), m.moneda))
+            .join(" y ")}
+          {" "}
+          -no se suma acá arriba para no mezclar monedas, pero sí cuenta en Movimientos recientes.
+        </p>
+      )}
 
       <div className="grid" style={{ gridTemplateColumns: "1.35fr 1fr" }}>
         <TendenciaMensual tendencia={datos.tendencia} />
