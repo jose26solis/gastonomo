@@ -143,6 +143,28 @@ class ResumenFinancieroResponse(BaseModel):
     por_mes: list[ResumenMensualResponse]
 
 
+class ComprobanteConFuenteResponse(ComprobanteParseadoResponse):
+    """Un comprobante, con la cuenta de correo de la que salió.
+
+    Solo lo devuelven los endpoints que combinan varias cuentas: con un solo
+    buzón vinculado, saber "de dónde vino" no aporta nada que el titular no
+    sepa ya.
+    """
+
+    cuenta_correo_id: int
+    proveedor: ProveedorCorreo
+    direccion_cuenta: str
+
+
+class ResumenFinancieroConFuenteResponse(BaseModel):
+    """Como ResumenFinancieroResponse, pero con la cuenta de origen de cada comprobante."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    comprobantes: list[ComprobanteConFuenteResponse]
+    por_mes: list[ResumenMensualResponse]
+
+
 class ResultadoDeSincronizacionResponse(BaseModel):
     """Cuánto correo nuevo trajo una sincronización explícita."""
 

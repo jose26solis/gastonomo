@@ -17,7 +17,7 @@ import type {
   MensajeResumido,
   Presupuesto,
   Proveedor,
-  ResumenFinanciero,
+  ResumenFinancieroConFuente,
   TipoDeCambio,
 } from "./types";
 
@@ -115,18 +115,20 @@ export const api = {
   },
 
   /**
-   * Lee y parsea todos los comprobantes de BAC de la bandeja, y los suma por mes.
+   * Lee y parsea los comprobantes de BAC de TODAS las cuentas activas del
+   * titular (Outlook y Gmail a la vez, si tiene ambas vinculadas), y los suma
+   * por mes. Cada comprobante trae marcada la cuenta de la que salió.
    *
-   * Puede tardar varios segundos: cada comprobante es una petición real al
-   * proveedor de correo. No hay un límite de tiempo especial en el fetch -el
-   * componente que llama esto debe mostrar un estado de carga mientras espera.
+   * Puede tardar varios segundos: cada comprobante nuevo es una petición real
+   * al proveedor de correo. No hay un límite de tiempo especial en el fetch
+   * -el componente que llama esto debe mostrar un estado de carga mientras espera.
    */
-  resumenFinanciero(usuarioId: number, cuentaId: number, limite = 200): Promise<ResumenFinanciero> {
+  resumenFinanciero(usuarioId: number, limite = 200): Promise<ResumenFinancieroConFuente> {
     const parametros = new URLSearchParams({
       usuario_id: String(usuarioId),
       limite: String(limite),
     });
-    return peticion(`/api/cuentas-correo/${cuentaId}/resumen-financiero?${parametros.toString()}`);
+    return peticion(`/api/cuentas-correo/resumen-financiero?${parametros.toString()}`);
   },
 
   desvincular(usuarioId: number, cuentaId: number): Promise<void> {
@@ -152,13 +154,13 @@ export const api = {
   // ---- Comercios ----
 
   /**
-   * Lee la bandeja real, resuelve cada comercio en el catálogo y adjunta su
-   * categoría sugerida. Igual que `resumenFinanciero`, puede tardar varios
-   * segundos: relee toda la bandeja cada vez.
+   * Lee las bandejas reales de todas las cuentas activas, resuelve cada
+   * comercio en el catálogo y adjunta su categoría sugerida. Igual que
+   * `resumenFinanciero`, puede tardar varios segundos: relee todo cada vez.
    */
-  listarComercios(usuarioId: number, cuentaId: number, limite = 200): Promise<ComercioClasificado[]> {
+  listarComercios(usuarioId: number, limite = 200): Promise<ComercioClasificado[]> {
     const parametros = new URLSearchParams({ usuario_id: String(usuarioId), limite: String(limite) });
-    return peticion(`/api/cuentas-correo/${cuentaId}/comercios?${parametros.toString()}`);
+    return peticion(`/api/cuentas-correo/comercios?${parametros.toString()}`);
   },
 
   asignarCategoriaComercio(
@@ -205,10 +207,10 @@ export const api = {
     });
   },
 
-  /** El límite comparado contra el gasto real ya clasificado del período -no solo el límite crudo. */
+  /** El límite comparado contra el gasto real ya clasificado del período, de
+   * todas las cuentas activas -no solo el límite crudo. */
   estadoDePresupuestos(
     usuarioId: number,
-    cuentaId: number,
     anio: number,
     mes: number,
     limite = 200,
@@ -219,28 +221,28 @@ export const api = {
       mes: String(mes),
       limite: String(limite),
     });
-    return peticion(`/api/cuentas-correo/${cuentaId}/presupuestos?${parametros.toString()}`);
+    return peticion(`/api/cuentas-correo/presupuestos?${parametros.toString()}`);
   },
 
   // ---- Reportes ----
 
-  descargarMovimientosCsv(usuarioId: number, cuentaId: number): Promise<void> {
+  descargarMovimientosCsv(usuarioId: number): Promise<void> {
     return descargarArchivo(
-      `/api/cuentas-correo/${cuentaId}/reportes/movimientos.csv?usuario_id=${usuarioId}`,
+      `/api/cuentas-correo/reportes/movimientos.csv?usuario_id=${usuarioId}`,
       "gastonomo-movimientos.csv",
     );
   },
 
-  descargarMovimientosExcel(usuarioId: number, cuentaId: number): Promise<void> {
+  descargarMovimientosExcel(usuarioId: number): Promise<void> {
     return descargarArchivo(
-      `/api/cuentas-correo/${cuentaId}/reportes/movimientos.xlsx?usuario_id=${usuarioId}`,
+      `/api/cuentas-correo/reportes/movimientos.xlsx?usuario_id=${usuarioId}`,
       "gastonomo-movimientos.xlsx",
     );
   },
 
-  descargarResumenPdf(usuarioId: number, cuentaId: number): Promise<void> {
+  descargarResumenPdf(usuarioId: number): Promise<void> {
     return descargarArchivo(
-      `/api/cuentas-correo/${cuentaId}/reportes/resumen.pdf?usuario_id=${usuarioId}`,
+      `/api/cuentas-correo/reportes/resumen.pdf?usuario_id=${usuarioId}`,
       "gastonomo-reporte.pdf",
     );
   },

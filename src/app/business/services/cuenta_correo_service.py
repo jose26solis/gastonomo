@@ -38,6 +38,22 @@ class ResultadoDeSincronizacion:
     sincronizado_en: datetime
 
 
+@dataclass(frozen=True)
+class ComprobanteConFuente:
+    """Un comprobante ya sincronizado, junto con la cuenta de la que vino.
+
+    Con una sola cuenta vinculada nunca hizo falta saber esto -todo salía del
+    mismo lugar. Con varias (Outlook y Gmail a la vez, por ejemplo),
+    `comprobantes_de_usuario` combina el historial de todas y sin esta
+    etiqueta no habría forma de mostrar de qué bandeja vino cada movimiento.
+    """
+
+    comprobante: ComprobanteParseado
+    cuenta_correo_id: int
+    proveedor: ProveedorCorreo
+    direccion: str
+
+
 def _fila_desde_parseado(
     cuenta_correo_id: int, mensaje_id: str, parseado: ComprobanteParseado
 ) -> Comprobante:
@@ -209,6 +225,57 @@ class CuentaCorreoService:
         comprobantes = [
             _parseado_desde_fila(fila) for fila in self.comprobantes.listar_de_cuenta(cuenta_id)
         ]
+        return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
+
+    def comprobantes_de_usuario(
+        self, usuario_id: int, limite: int = 200
+    ) -> list[ComprobanteConFuente]:
+        """Sincroniza y combina los comprobantes de TODAS las cuentas activas del titular.
+
+        Antes cada pantalla mostraba una sola cuenta -la primera que
+        encontrara activa. Con más de un buzón vinculado eso significaba que,
+        según cuál hubiera quedado activa más recientemente, el resto del
+        historial simplemente desaparecía de la vista aunque la cuenta
+        siguiera vinculada y con datos reales. Esto junta el historial de
+        todas las cuentas activas, etiquetando cada comprobante con de cuál
+        salió.
+
+        Una cuenta rota (token vencido sin refresco, o un error del
+        proveedor al listar mensajes) se salta en vez de tirar abajo el
+        resto: un buzón que falla no debería esconder los otros que sí
+        funcionan.
+        """
+        self._asegurar_usuario_activo(usuario_id)
+        cuentas_activas = [
+            c
+            for c in self.cuentas.listar_de_usuario(usuario_id)
+            if c.estado == EstadoCuentaCorreo.ACTIVA
+        ]
+
+        con_fuente: list[ComprobanteConFuente] = []
+        for cuenta in cuentas_activas:
+            try:
+                self._sincronizar_comprobantes(cuenta, limite)
+            except (ReglaDeNegocioViolada, ErrorDeProveedorExterno):
+                continue
+            for fila in self.comprobantes.listar_de_cuenta(cuenta.id):
+                con_fuente.append(
+                    ComprobanteConFuente(
+                        comprobante=_parseado_desde_fila(fila),
+                        cuenta_correo_id=cuenta.id,
+                        proveedor=cuenta.proveedor,
+                        direccion=cuenta.direccion,
+                    )
+                )
+        return con_fuente
+
+    def resumen_financiero_de_usuario(
+        self, usuario_id: int, limite: int = 200
+    ) -> ResumenFinanciero:
+        """El mismo resumen por mes que `resumen_financiero`, pero de todas las
+        cuentas activas del titular en vez de una sola. Ver `comprobantes_de_usuario`.
+        """
+        comprobantes = [c.comprobante for c in self.comprobantes_de_usuario(usuario_id, limite)]
         return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
 
     def sincronizar(

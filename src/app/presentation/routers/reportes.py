@@ -24,6 +24,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from app.business.errors import ReglaDeNegocioViolada
 from app.business.services.comercio_service import ComercioClasificado, MovimientoDetallado
 from app.business.services.resumen_service import entrada_preferida_del_periodo
+from app.data.models.enums import EstadoCuentaCorreo
 from app.presentation.dependencies import ServicioDeComercios, ServicioDeCuentasCorreo
 
 router = APIRouter(prefix="/api/cuentas-correo", tags=["reportes"])
@@ -131,6 +132,102 @@ def exportar_resumen_pdf(
 
     contenido = _pdf_de_resumen(
         direccion_cuenta=direccion,
+        anio=mes_actual.anio,
+        mes=mes_actual.mes,
+        moneda=mes_actual.moneda,
+        total_mes=mes_actual.total,
+        cantidad_transacciones=mes_actual.cantidad_transacciones,
+        comercios=comercios,
+    )
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="gastonomo-reporte.pdf"'},
+    )
+
+
+@router.get(
+    "/reportes/movimientos.csv",
+    summary="Exportar a CSV los movimientos de todas las cuentas activas del titular",
+)
+def exportar_movimientos_csv_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> Response:
+    """Igual que `/{cuenta_id}/reportes/movimientos.csv`, pero combinando todas
+    las cuentas activas del titular en vez de exportar una sola bandeja.
+    """
+    resumen = servicio.resumen_financiero_de_usuario(usuario_id, limite)
+    movimientos = servicio_comercios.detallar_comprobantes(usuario_id, resumen.comprobantes)
+    contenido = _csv_de_movimientos(movimientos)
+    return Response(
+        content=contenido,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="gastonomo-movimientos.csv"'},
+    )
+
+
+@router.get(
+    "/reportes/movimientos.xlsx",
+    summary="Exportar a Excel los movimientos de todas las cuentas activas del titular",
+)
+def exportar_movimientos_excel_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> Response:
+    """Igual que `/{cuenta_id}/reportes/movimientos.xlsx`, pero combinando todas
+    las cuentas activas del titular en vez de exportar una sola bandeja.
+    """
+    resumen = servicio.resumen_financiero_de_usuario(usuario_id, limite)
+    movimientos = servicio_comercios.detallar_comprobantes(usuario_id, resumen.comprobantes)
+    contenido = _excel_de_movimientos(movimientos)
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="gastonomo-movimientos.xlsx"'},
+    )
+
+
+@router.get(
+    "/reportes/resumen.pdf",
+    summary="Exportar un reporte en PDF combinando todas las cuentas activas del titular",
+)
+def exportar_resumen_pdf_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> Response:
+    """Igual que `/{cuenta_id}/reportes/resumen.pdf`, pero sobre el gasto
+    combinado de todas las cuentas activas del titular.
+    """
+    resumen = servicio.resumen_financiero_de_usuario(usuario_id, limite)
+    if not resumen.por_mes:
+        raise ReglaDeNegocioViolada(
+            "No hay comprobantes de BAC reconocidos todavía para armar un reporte."
+        )
+    anio_mas_reciente = resumen.por_mes[0].anio
+    mes_mas_reciente = resumen.por_mes[0].mes
+    mes_actual = entrada_preferida_del_periodo(resumen.por_mes, anio_mas_reciente, mes_mas_reciente)
+    assert mes_actual is not None  # por_mes[0] es de ese mismo período, siempre hay al menos uno
+    prefijo_mes = f"{mes_actual.anio}-{mes_actual.mes:02d}"
+    comprobantes_del_mes = [
+        c
+        for c in resumen.comprobantes
+        if c.fecha and c.fecha.strftime("%Y-%m") == prefijo_mes and c.moneda == mes_actual.moneda
+    ]
+    comercios = servicio_comercios.clasificar_comprobantes(usuario_id, comprobantes_del_mes)
+
+    direcciones = [
+        c.direccion for c in servicio.listar(usuario_id) if c.estado == EstadoCuentaCorreo.ACTIVA
+    ]
+
+    contenido = _pdf_de_resumen(
+        direccion_cuenta=", ".join(direcciones),
         anio=mes_actual.anio,
         mes=mes_actual.mes,
         moneda=mes_actual.moneda,

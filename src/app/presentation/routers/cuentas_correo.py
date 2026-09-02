@@ -25,8 +25,8 @@ from fastapi import APIRouter, Query
 
 from app.business.errors import DatosInvalidos
 from app.business.seguridad.cifrado import TokenIlegible, cifrar, descifrar
-from app.business.services.cuenta_correo_service import VincularCuentaComando
-from app.business.services.resumen_service import filtrar_del_periodo
+from app.business.services.cuenta_correo_service import ComprobanteConFuente, VincularCuentaComando
+from app.business.services.resumen_service import agrupar_por_mes, filtrar_del_periodo
 from app.data.models.enums import ProveedorCorreo
 from app.presentation.dependencies import (
     ServicioDeComercios,
@@ -35,13 +35,16 @@ from app.presentation.dependencies import (
 )
 from app.presentation.schemas import (
     ComercioClasificadoResponse,
+    ComprobanteConFuenteResponse,
     ComprobanteParseadoResponse,
     CuentaCorreoResponse,
     EstadoDePresupuestoResponse,
     IniciarVinculacionResponse,
     MensajeResumidoResponse,
     ResultadoDeSincronizacionResponse,
+    ResumenFinancieroConFuenteResponse,
     ResumenFinancieroResponse,
+    ResumenMensualResponse,
 )
 
 router = APIRouter(prefix="/api/cuentas-correo", tags=["cuentas-correo"])
@@ -133,6 +136,82 @@ def listar_cuentas(
 ) -> list[CuentaCorreoResponse]:
     """Lista los buzones vinculados del titular indicado."""
     return [CuentaCorreoResponse.model_validate(c) for c in servicio.listar(usuario_id)]
+
+
+def _response_desde_con_fuente(item: ComprobanteConFuente) -> ComprobanteConFuenteResponse:
+    base = ComprobanteParseadoResponse.model_validate(item.comprobante)
+    return ComprobanteConFuenteResponse(
+        **base.model_dump(),
+        cuenta_correo_id=item.cuenta_correo_id,
+        proveedor=item.proveedor,
+        direccion_cuenta=item.direccion,
+    )
+
+
+@router.get(
+    "/resumen-financiero",
+    response_model=ResumenFinancieroConFuenteResponse,
+    summary="Combinar el resumen financiero de todas las cuentas activas del titular",
+)
+def resumen_financiero_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> ResumenFinancieroConFuenteResponse:
+    """Igual que `/{cuenta_id}/resumen-financiero`, pero sumando el historial de
+    TODAS las cuentas de correo activas del titular en vez de una sola -así un
+    titular con Outlook y Gmail vinculados a la vez ve su gasto real completo
+    en un solo lugar, con cada movimiento marcado según de qué bandeja salió.
+    """
+    con_fuente = servicio.comprobantes_de_usuario(usuario_id, limite)
+    comprobantes = [c.comprobante for c in con_fuente]
+    return ResumenFinancieroConFuenteResponse(
+        comprobantes=[_response_desde_con_fuente(c) for c in con_fuente],
+        por_mes=[ResumenMensualResponse.model_validate(r) for r in agrupar_por_mes(comprobantes)],
+    )
+
+
+@router.get(
+    "/comercios",
+    response_model=list[ComercioClasificadoResponse],
+    summary="Comercios clasificados, combinando todas las cuentas activas del titular",
+)
+def comercios_clasificados_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> list[ComercioClasificadoResponse]:
+    """Igual que `/{cuenta_id}/comercios`, pero sobre el historial combinado
+    de todas las cuentas activas del titular.
+    """
+    resumen = servicio.resumen_financiero_de_usuario(usuario_id, limite)
+    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, resumen.comprobantes)
+    return [ComercioClasificadoResponse.model_validate(c) for c in clasificados]
+
+
+@router.get(
+    "/presupuestos",
+    response_model=list[EstadoDePresupuestoResponse],
+    summary="Estado de los presupuestos, combinando todas las cuentas activas del titular",
+)
+def presupuestos_del_periodo_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    servicio_comercios: ServicioDeComercios,
+    servicio_presupuestos: ServicioDePresupuestos,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    anio: int = Query(ge=2000, le=2100),
+    mes: int = Query(ge=1, le=12),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> list[EstadoDePresupuestoResponse]:
+    """Igual que `/{cuenta_id}/presupuestos`, pero comparando el consumo real
+    de todas las cuentas activas del titular contra el límite de cada categoría.
+    """
+    resumen = servicio.resumen_financiero_de_usuario(usuario_id, limite)
+    comprobantes_del_periodo = filtrar_del_periodo(resumen.comprobantes, anio, mes)
+    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, comprobantes_del_periodo)
+    estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes, clasificados)
+    return [EstadoDePresupuestoResponse.model_validate(e) for e in estados]
 
 
 @router.get(

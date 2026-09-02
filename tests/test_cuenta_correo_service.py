@@ -6,7 +6,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from app.business.errors import RecursoNoEncontrado, ReglaDeNegocioViolada
+from app.business.errors import (
+    ErrorDeProveedorExterno,
+    RecursoNoEncontrado,
+    ReglaDeNegocioViolada,
+)
 from app.business.seguridad.cifrado import descifrar
 from app.business.services.cuenta_correo_service import CuentaCorreoService, VincularCuentaComando
 from app.data.models.enums import EstadoCuentaCorreo, Moneda, ProveedorCorreo
@@ -207,6 +211,102 @@ def test_sincronizar_devuelve_cuantos_comprobantes_trajo_de_nuevo(
     assert segunda.comprobantes_nuevos == 0, "ya no hay nada nuevo que traer"
     assert segunda.comprobantes_totales == 1
     assert segunda.sincronizado_en >= primera.sincronizado_en
+
+
+class _ProveedorQueFalla(ProveedorDeCorreoFalso):
+    """Un buzón cuya bandeja no se puede leer: el proveedor tira error al listar."""
+
+    def listar_mensajes_recientes(
+        self, token_acceso: str, limite: int, remitente_contiene: str | None = None
+    ) -> list:
+        raise ErrorDeProveedorExterno("El proveedor no responde.")
+
+
+def _servicio_con_dos_buzones(
+    sesion: Session, gmail: ProveedorDeCorreoFalso | None = None
+) -> tuple[CuentaCorreoService, ProveedorDeCorreoFalso, ProveedorDeCorreoFalso]:
+    """Un servicio con Outlook y Gmail vinculables, cada uno con su propia dirección."""
+    outlook = ProveedorDeCorreoFalso(direccion="titular@hotmail.com")
+    gmail = gmail or ProveedorDeCorreoFalso(direccion="titular@gmail.com")
+    servicio = CuentaCorreoService(
+        CuentaCorreoRepository(sesion),
+        UsuarioRepository(sesion),
+        {ProveedorCorreo.OUTLOOK: outlook, ProveedorCorreo.GMAIL: gmail},
+        ComprobanteRepository(sesion),
+    )
+    return servicio, outlook, gmail
+
+
+def _vincular_ambos(servicio: CuentaCorreoService, usuario: Usuario) -> None:
+    for proveedor in (ProveedorCorreo.OUTLOOK, ProveedorCorreo.GMAIL):
+        servicio.vincular(
+            VincularCuentaComando(usuario_id=usuario.id, proveedor=proveedor, codigo="c")
+        )
+
+
+def test_comprobantes_de_usuario_combina_las_dos_cuentas_y_marca_su_origen(
+    sesion: Session, usuario: Usuario
+) -> None:
+    """El historial de dos buzones vinculados se ve junto, no uno u otro.
+
+    Es la regresión que motivó `comprobantes_de_usuario`: antes cada pantalla
+    leía "la" cuenta activa -la primera que encontrara- y al vincular un
+    segundo buzón el historial del primero desaparecía de la vista.
+    """
+    servicio, _, _ = _servicio_con_dos_buzones(sesion)
+    _vincular_ambos(servicio, usuario)
+
+    combinados = servicio.comprobantes_de_usuario(usuario.id)
+
+    assert len(combinados) == 2, "debe traer el comprobante de cada buzón, no el de uno solo"
+    assert {c.proveedor for c in combinados} == {ProveedorCorreo.OUTLOOK, ProveedorCorreo.GMAIL}
+    assert {c.direccion for c in combinados} == {"titular@hotmail.com", "titular@gmail.com"}
+    assert {c.comprobante.comercio for c in combinados} == {"WALMART SAN SEBASTIAN"}
+
+
+def test_el_resumen_de_usuario_suma_el_gasto_de_todas_las_cuentas(
+    sesion: Session, usuario: Usuario
+) -> None:
+    servicio, _, _ = _servicio_con_dos_buzones(sesion)
+    _vincular_ambos(servicio, usuario)
+
+    resumen = servicio.resumen_financiero_de_usuario(usuario.id)
+
+    assert len(resumen.por_mes) == 1
+    assert resumen.por_mes[0].cantidad_transacciones == 2
+    assert resumen.por_mes[0].total == Decimal("15740.00"), "7870 de cada buzón"
+
+
+def test_una_cuenta_rota_no_esconde_el_historial_de_las_demas(
+    sesion: Session, usuario: Usuario
+) -> None:
+    """Un buzón que falla se salta; los que sí responden se siguen viendo.
+
+    Sin esto, un token vencido o una caída puntual de un proveedor dejarían
+    la pantalla entera en error, escondiendo gasto real que ya estaba leído.
+    """
+    servicio, _, _ = _servicio_con_dos_buzones(
+        sesion, gmail=_ProveedorQueFalla("titular@gmail.com")
+    )
+    _vincular_ambos(servicio, usuario)
+
+    combinados = servicio.comprobantes_de_usuario(usuario.id)
+
+    assert len(combinados) == 1
+    assert combinados[0].proveedor == ProveedorCorreo.OUTLOOK
+
+
+def test_el_resumen_de_usuario_ignora_las_cuentas_desvinculadas(
+    sesion: Session, usuario: Usuario
+) -> None:
+    servicio, _, _ = _servicio_con_dos_buzones(sesion)
+    _vincular_ambos(servicio, usuario)
+    gmail = next(c for c in servicio.listar(usuario.id) if c.proveedor == ProveedorCorreo.GMAIL)
+    servicio.desvincular(usuario.id, gmail.id)
+
+    combinados = servicio.comprobantes_de_usuario(usuario.id)
+
+    assert [c.proveedor for c in combinados] == [ProveedorCorreo.OUTLOOK]
 
 
 def test_probar_conexion_en_una_cuenta_desvinculada_falla(

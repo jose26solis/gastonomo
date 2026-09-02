@@ -16,18 +16,18 @@ const FORMATOS: { id: Formato; etiqueta: string; descripcion: string; icono: Rea
 ];
 
 export function Reportes({ usuarioId, onIrAConectar }: { usuarioId: number; onIrAConectar: () => void }) {
-  const { cargando, cuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
+  const { cargando, cuentas, hayCuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
   const [descargando, setDescargando] = useState<Formato | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function descargar(formato: Formato) {
-    if (!cuentaActiva) return;
+    if (!hayCuentaActiva) return;
     setDescargando(formato);
     setError(null);
     try {
-      if (formato === "csv") await api.descargarMovimientosCsv(usuarioId, cuentaActiva.id);
-      if (formato === "xlsx") await api.descargarMovimientosExcel(usuarioId, cuentaActiva.id);
-      if (formato === "pdf") await api.descargarResumenPdf(usuarioId, cuentaActiva.id);
+      if (formato === "csv") await api.descargarMovimientosCsv(usuarioId);
+      if (formato === "xlsx") await api.descargarMovimientosExcel(usuarioId);
+      if (formato === "pdf") await api.descargarResumenPdf(usuarioId);
     } catch (e) {
       setError(mensajeDeError(e));
     } finally {
@@ -41,7 +41,7 @@ export function Reportes({ usuarioId, onIrAConectar }: { usuarioId: number; onIr
   if (cargando) {
     return <p className="vacio">Cargando…</p>;
   }
-  if (!cuentaActiva) {
+  if (!hayCuentaActiva) {
     return (
       <div className="card stack" style={{ maxWidth: 480 }}>
         <div className="section-title">Todavía no hay ningún buzón vinculado</div>
@@ -55,12 +55,14 @@ export function Reportes({ usuarioId, onIrAConectar }: { usuarioId: number; onIr
     );
   }
 
+  const direcciones = cuentas.filter((c) => c.estado === "ACTIVA").map((c) => c.direccion);
+
   return (
     <div className="stack" style={{ maxWidth: 720 }}>
       {error && <p className="mensaje-error">{error}</p>}
 
       <p className="section-subtitle" style={{ margin: 0 }}>
-        Cada descarga relee tu bandeja real de {cuentaActiva.direccion} en el momento -puede tardar
+        Cada descarga relee tu bandeja real de {direcciones.join(" y ")} en el momento -puede tardar
         varios segundos con muchos comprobantes.
       </p>
 

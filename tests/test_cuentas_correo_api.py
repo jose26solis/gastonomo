@@ -193,3 +193,44 @@ def test_probar_conexion_de_una_cuenta_de_otro_titular_da_404(
     )
 
     assert respuesta.status_code == 404
+
+
+def test_el_resumen_combinado_trae_las_dos_cuentas_marcadas_con_su_origen(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario
+) -> None:
+    """El endpoint sin `cuenta_id` junta el historial de todos los buzones activos.
+
+    Cada comprobante viaja marcado con el proveedor y la dirección de la que
+    salió: es el dato que el frontend necesita para poder decir, en la lista
+    de movimientos, si esa compra vino del Hotmail o del Gmail.
+    """
+    estado = _codificar_estado(usuario.id)
+    for proveedor in ("outlook", "gmail"):
+        cliente_con_dos_buzones.get(
+            f"/api/cuentas-correo/{proveedor}/callback", params={"code": "c", "state": estado}
+        )
+
+    respuesta = cliente_con_dos_buzones.get(
+        "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert len(cuerpo["comprobantes"]) == 2, "debe combinar los dos buzones, no elegir uno"
+    assert {c["proveedor"] for c in cuerpo["comprobantes"]} == {"OUTLOOK", "GMAIL"}
+    assert {c["direccion_cuenta"] for c in cuerpo["comprobantes"]} == {
+        "titular@hotmail.com",
+        "titular@gmail.com",
+    }
+    assert cuerpo["por_mes"][0]["cantidad_transacciones"] == 2
+
+
+def test_el_resumen_combinado_sin_cuentas_vinculadas_no_falla(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    respuesta = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    assert respuesta.json() == {"comprobantes": [], "por_mes": []}

@@ -2,7 +2,16 @@ import { useEffect, useState } from "react";
 import { api, ErrorDeApiError } from "../api";
 import type { CuentaCorreo } from "../types";
 
-/** Busca la cuenta de correo activa de un usuario. Varias pantallas lo necesitan. */
+/**
+ * Busca las cuentas de correo del usuario. Varias pantallas solo necesitan
+ * saber si hay al menos una vinculada y activa -para eso está
+ * `hayCuentaActiva`- porque los datos en sí ya se piden combinando todas las
+ * cuentas activas (`api.resumenFinanciero`, `api.listarComercios`, etc.), no
+ * de una cuenta puntual. Antes este hook devolvía "la" cuenta activa (la
+ * primera que encontrara); con dos cuentas vinculadas a la vez eso hacía que,
+ * según cuál hubiera quedado activa más recientemente, el resto del
+ * historial pareciera desaparecer de la vista.
+ */
 export function useCuentaActiva(usuarioId: number) {
   const [cuentas, setCuentas] = useState<CuentaCorreo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +40,8 @@ export function useCuentaActiva(usuarioId: number) {
 
   return {
     cargando: cuentas === null,
-    cuentaActiva: cuentas?.find((c) => c.estado === "ACTIVA") ?? null,
+    cuentas: cuentas ?? [],
+    hayCuentaActiva: cuentas?.some((c) => c.estado === "ACTIVA") ?? false,
     error,
   };
 }

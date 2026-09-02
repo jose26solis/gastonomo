@@ -3,16 +3,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ErrorDeApiError } from "../api";
 import { formatearFechaCorta, formatearMes, formatearMonto } from "../lib/formato";
 import type {
-  ComprobanteParseado,
+  ComprobanteConFuente,
   CuentaCorreo,
-  ResumenFinanciero,
+  ResumenFinancieroConFuente,
   ResumenMensual,
   TipoDeCambio,
 } from "../types";
 
 const ACENTOS = ["#b5abfc", "#968ae0", "#796cbf", "#5d5294", "#423a6a", "#7972a9"];
 
-function esSumable(c: ComprobanteParseado): c is ComprobanteParseado & {
+const NOMBRE_PROVEEDOR: Record<string, string> = { OUTLOOK: "Outlook", GMAIL: "Gmail" };
+
+function esSumable(c: ComprobanteConFuente): c is ComprobanteConFuente & {
   fecha: string;
   moneda: string;
   monto: string;
@@ -48,7 +50,7 @@ export function Resumen({
   onIrAConectar: () => void;
 }) {
   const [cuentas, setCuentas] = useState<CuentaCorreo[] | null>(null);
-  const [resumen, setResumen] = useState<ResumenFinanciero | null>(null);
+  const [resumen, setResumen] = useState<ResumenFinancieroConFuente | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // null = "el más reciente" (comportamiento por defecto); se llena cuando
@@ -74,30 +76,44 @@ export function Resumen({
     };
   }, [usuarioId]);
 
-  const cuentaActiva = cuentas?.find((c) => c.estado === "ACTIVA") ?? null;
+  // Todas las cuentas activas, no solo "la" activa: con Outlook y Gmail
+  // vinculados a la vez, el resumen combina el historial de ambas -antes
+  // esta pantalla elegía arbitrariamente la primera que encontrara, y el
+  // resto del historial parecía desaparecer aunque siguiera vinculado.
+  const cuentasActivas = cuentas?.filter((c) => c.estado === "ACTIVA") ?? [];
+  const hayCuentaActiva = cuentasActivas.length > 0;
+  // Clave estable del conjunto de cuentas activas: cambia si se vincula,
+  // desvincula o reconecta una cuenta, y solo entonces -no en cada
+  // re-render- hay que volver a pedir el resumen combinado.
+  const claveCuentasActivas = cuentasActivas
+    .map((c) => c.id)
+    .sort((a, b) => a - b)
+    .join(",");
 
   useEffect(() => {
-    if (!cuentaActiva) {
+    if (cuentas === null) return;
+    if (!hayCuentaActiva) {
       onEstadoDeSincronizacion("Sin buzones vinculados todavía", false);
       return;
     }
-    onEstadoDeSincronizacion(`${cuentaActiva.direccion} · leyendo comprobantes…`, true);
+    const direcciones = cuentasActivas.map((c) => c.direccion).join(" y ");
+    onEstadoDeSincronizacion(`${direcciones} · leyendo comprobantes…`, true);
     let cancelado = false;
     setCargando(true);
     api
-      .resumenFinanciero(usuarioId, cuentaActiva.id)
+      .resumenFinanciero(usuarioId)
       .then((r) => {
         if (cancelado) return;
         setResumen(r);
         onEstadoDeSincronizacion(
-          `${cuentaActiva.direccion} · ${r.comprobantes.length} comprobantes leídos`,
+          `${direcciones} · ${r.comprobantes.length} comprobantes leídos`,
           false,
         );
       })
       .catch((e: unknown) => {
         if (cancelado) return;
         setError(mensajeDeError(e));
-        onEstadoDeSincronizacion(`${cuentaActiva.direccion} · error al leer`, false);
+        onEstadoDeSincronizacion(`${direcciones} · error al leer`, false);
       })
       .finally(() => {
         if (!cancelado) setCargando(false);
@@ -107,7 +123,7 @@ export function Resumen({
     };
     // onEstadoDeSincronizacion es un canal de salida, no una dependencia de datos.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cuentaActiva?.id, usuarioId]);
+  }, [cuentas === null, claveCuentasActivas, usuarioId]);
 
   const datos = useMemo(() => {
     if (!resumen || resumen.por_mes.length === 0) return null;
@@ -146,9 +162,19 @@ export function Resumen({
     );
     const prefijoMes = `${mesActual.anio}-${String(mesActual.mes).padStart(2, "0")}`;
 
-    const comprobantesDelMes = resumen.comprobantes
+    // Todo lo del mes, sumable, sin importar la moneda -para la lista de
+    // movimientos: un tracker de gastos no debería esconder una compra real
+    // solo porque quedó en una moneda distinta a la del resto del mes.
+    const comprobantesDelMesTodasLasMonedas = resumen.comprobantes
       .filter(esSumable)
-      .filter((c) => c.fecha.startsWith(prefijoMes) && c.moneda === mesActual.moneda);
+      .filter((c) => c.fecha.startsWith(prefijoMes));
+
+    // Lo mismo, pero solo en la moneda que se está totalizando arriba: los
+    // gráficos y KPIs sí necesitan una sola moneda para poder sumar de forma
+    // honesta (por comercio, por día, promedio...).
+    const comprobantesDelMes = comprobantesDelMesTodasLasMonedas.filter(
+      (c) => c.moneda === mesActual.moneda,
+    );
 
     const totalMes = Number(mesActual.total);
     const cantidadMes = mesActual.cantidad_transacciones;
@@ -187,7 +213,8 @@ export function Resumen({
     // Del período que se está viendo, no de toda la bandeja -si no, elegir
     // un mes anterior en el selector de arriba seguiría mostrando lo último
     // de hoy acá abajo, que es justo lo contrario de lo que se pidió ver.
-    const movimientosRecientes = [...comprobantesDelMes]
+    // Todas las monedas del mes, a propósito (ver comprobantesDelMesTodasLasMonedas).
+    const movimientosRecientes = [...comprobantesDelMesTodasLasMonedas]
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
       .slice(0, 8);
 
@@ -215,13 +242,14 @@ export function Resumen({
       movimientosRecientes,
       tendencia,
       periodos,
+      hayMovimientosEnUsd: comprobantesDelMesTodasLasMonedas.some((c) => c.moneda === "USD"),
       esMesActual: periodoActual.anio === periodos[0].anio && periodoActual.mes === periodos[0].mes,
     };
   }, [resumen, periodoElegido]);
 
   const intentoTipoDeCambio = useRef(false);
   useEffect(() => {
-    const necesitaConversion = datos?.otrasMonedasDelMes.some((m) => m.moneda === "USD") ?? false;
+    const necesitaConversion = datos?.hayMovimientosEnUsd ?? false;
     if (!necesitaConversion || intentoTipoDeCambio.current) return;
     intentoTipoDeCambio.current = true;
     api
@@ -242,7 +270,7 @@ export function Resumen({
     return <p className="vacio">Cargando…</p>;
   }
 
-  if (!cuentaActiva) {
+  if (!hayCuentaActiva) {
     return (
       <div className="card stack" style={{ maxWidth: 480 }}>
         <div className="section-title">Todavía no hay ningún buzón vinculado</div>
@@ -261,8 +289,8 @@ export function Resumen({
     return (
       <div className="stack">
         <p className="vacio">
-          Leyendo comprobantes de {cuentaActiva.direccion}… puede tardar varios segundos, cada uno
-          es una petición aparte al proveedor.
+          Leyendo comprobantes de {cuentasActivas.map((c) => c.direccion).join(" y ")}… puede tardar
+          varios segundos, cada uno es una petición aparte al proveedor.
         </p>
       </div>
     );
@@ -368,10 +396,10 @@ export function Resumen({
           porDia={datos.porDia}
           moneda={datos.mesActual.moneda}
         />
-        <ResumenCuenta cuenta={cuentaActiva} totalComprobantes={resumen?.comprobantes.length ?? 0} />
+        <ResumenCuenta cuentas={cuentasActivas} comprobantes={resumen?.comprobantes ?? []} />
       </div>
 
-      <MovimientosRecientes movimientos={datos.movimientosRecientes} />
+      <MovimientosRecientes movimientos={datos.movimientosRecientes} tipoDeCambio={tipoDeCambio} />
     </div>
   );
 }
@@ -402,7 +430,7 @@ function KpiCard({
   );
 }
 
-function TendenciaMensual({ tendencia }: { tendencia: ResumenFinanciero["por_mes"] }) {
+function TendenciaMensual({ tendencia }: { tendencia: ResumenMensual[] }) {
   const ancho = 560;
   const alto = 180;
   const valores = tendencia.map((t) => Number(t.total));
@@ -622,13 +650,41 @@ function CalendarioDeGastos({
   );
 }
 
-function ResumenCuenta({ cuenta, totalComprobantes }: { cuenta: CuentaCorreo; totalComprobantes: number }) {
+function ResumenCuenta({
+  cuentas,
+  comprobantes,
+}: {
+  cuentas: CuentaCorreo[];
+  comprobantes: ComprobanteConFuente[];
+}) {
+  // Cuántos comprobantes aportó cada buzón. Una cuenta vinculada que aparece
+  // en 0 es información útil, no un error: significa que a esa dirección BAC
+  // no le está mandando notificaciones -que es lo que pasa si el banco tiene
+  // registrada la otra.
+  const porCuenta = cuentas.map((cuenta) => ({
+    cuenta,
+    total: comprobantes.filter((c) => c.cuenta_correo_id === cuenta.id).length,
+  }));
+
   return (
     <section className="card stack">
       <div className="section-title">Fuente de estos datos</div>
-      <div style={{ fontSize: 11.5, color: "var(--color-text-bright-muted)" }}>{cuenta.direccion}</div>
-      <div className="section-subtitle" style={{ marginTop: 0 }}>
-        {totalComprobantes} comprobantes de BAC leídos de esta bandeja
+      <div className="stack" style={{ gap: 7 }}>
+        {porCuenta.map(({ cuenta, total }) => (
+          <div key={cuenta.id} className="stack" style={{ gap: 2 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ fontSize: 11.5, color: "var(--color-text-bright-muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {cuenta.direccion}
+              </span>
+              <EtiquetaFuente proveedor={cuenta.proveedor} />
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>
+              {total === 0
+                ? "Sin comprobantes de BAC en esta bandeja"
+                : `${total} comprobantes de BAC leídos`}
+            </div>
+          </div>
+        ))}
       </div>
       <div style={{ fontSize: 11, color: "var(--color-text-dim)", lineHeight: 1.6 }}>
         Solo se cuentan los comprobantes que el parser entendió con confianza. Transferencias u
@@ -638,13 +694,39 @@ function ResumenCuenta({ cuenta, totalComprobantes }: { cuenta: CuentaCorreo; to
   );
 }
 
-function MovimientosRecientes({ movimientos }: { movimientos: ComprobanteParseado[] }) {
+/** Pastilla chica que dice de qué buzón salió un movimiento. */
+function EtiquetaFuente({ proveedor }: { proveedor: string }) {
+  return (
+    <span
+      style={{
+        fontSize: 9.5,
+        padding: "1px 6px",
+        borderRadius: 999,
+        background: "var(--color-surface-2)",
+        color: "var(--color-text-muted)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {NOMBRE_PROVEEDOR[proveedor] ?? proveedor}
+    </span>
+  );
+}
+
+function MovimientosRecientes({
+  movimientos,
+  tipoDeCambio,
+}: {
+  movimientos: ComprobanteConFuente[];
+  tipoDeCambio: TipoDeCambio | null;
+}) {
   return (
     <section className="card card--tight">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 17 }}>
         <div>
           <div className="section-title">Movimientos recientes</div>
-          <div className="section-subtitle">Extraídos de comprobantes reales de BAC en tu bandeja</div>
+          <div className="section-subtitle">
+            De todas tus bandejas vinculadas, en cualquier moneda
+          </div>
         </div>
       </div>
       {movimientos.length === 0 ? (
@@ -653,45 +735,66 @@ function MovimientosRecientes({ movimientos }: { movimientos: ComprobanteParsead
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
-          {movimientos.map((m, i) => (
-            <div
-              key={`${m.autorizacion}-${i}`}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "30px 1.6fr 1fr 110px",
-                alignItems: "center",
-                gap: 11,
-                padding: "11px 17px",
-                borderTop: "1px solid var(--color-surface-2)",
-              }}
-            >
-              <span
+          {movimientos.map((m, i) => {
+            // Un movimiento en dólares se muestra en su moneda real, con el
+            // equivalente en colones al lado -no convertido en silencio: el
+            // monto que cobraron es el de arriba, este es una referencia.
+            const equivalente =
+              m.moneda !== "CRC" && m.moneda === "USD" && tipoDeCambio
+                ? Number(m.monto) * Number(tipoDeCambio.venta)
+                : null;
+            return (
+              <div
+                key={`${m.autorizacion}-${i}`}
                 style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
-                  background: "var(--color-surface-2)",
                   display: "grid",
-                  placeItems: "center",
-                  color: "var(--color-accent-200)",
+                  gridTemplateColumns: "30px 1.6fr 1fr 130px",
+                  alignItems: "center",
+                  gap: 11,
+                  padding: "11px 17px",
+                  borderTop: "1px solid var(--color-surface-2)",
                 }}
               >
-                <Storefront size={14} />
-              </span>
-              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                <span style={{ fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {m.comercio ?? "Sin identificar"}
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 8,
+                    background: "var(--color-surface-2)",
+                    display: "grid",
+                    placeItems: "center",
+                    color: "var(--color-accent-200)",
+                  }}
+                >
+                  <Storefront size={14} />
                 </span>
-                <span style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>
-                  {formatearFechaCorta(m.fecha!)} · {m.marca_tarjeta} ••{m.ultimos_cuatro}
+                <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {m.comercio ?? "Sin identificar"}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>
+                    {formatearFechaCorta(m.fecha!)} · {m.marca_tarjeta} ••{m.ultimos_cuatro}
+                  </span>
                 </span>
-              </span>
-              <span style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>{m.ciudad ?? ""}</span>
-              <span style={{ fontSize: 13, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {formatearMonto(-Number(m.monto), m.moneda!)}
-              </span>
-            </div>
-          ))}
+                <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                  <EtiquetaFuente proveedor={m.proveedor} />
+                  <span style={{ fontSize: 10.5, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.ciudad ?? ""}
+                  </span>
+                </span>
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+                  <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                    {formatearMonto(-Number(m.monto), m.moneda!)}
+                  </span>
+                  {equivalente !== null && (
+                    <span style={{ fontSize: 10, color: "var(--color-text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                      ≈ {formatearMonto(-equivalente, "CRC")}
+                    </span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

@@ -101,3 +101,31 @@ def cliente_con_correo_falso(
     app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio
     yield cliente
     del app.dependency_overrides[obtener_servicio_de_cuentas_correo]
+
+
+@pytest.fixture
+def cliente_con_dos_buzones(cliente: TestClient, sesion: Session) -> Iterator[TestClient]:
+    """Cliente HTTP con Outlook y Gmail como dos buzones distintos, cada uno con su dirección.
+
+    A diferencia de `cliente_con_correo_falso` -que usa el mismo doble para
+    los dos proveedores- acá cada proveedor devuelve una dirección propia,
+    que es lo que pasa de verdad cuando alguien vincula su Hotmail y su
+    Gmail. Hace falta para probar todo lo que combina varias cuentas: con la
+    misma dirección en ambos, la segunda vinculación chocaría contra el
+    UNIQUE de `(usuario_id, direccion)`.
+    """
+
+    def _armar_servicio() -> CuentaCorreoService:
+        return CuentaCorreoService(
+            CuentaCorreoRepository(sesion),
+            UsuarioRepository(sesion),
+            {
+                ProveedorCorreo.OUTLOOK: ProveedorDeCorreoFalso(direccion="titular@hotmail.com"),
+                ProveedorCorreo.GMAIL: ProveedorDeCorreoFalso(direccion="titular@gmail.com"),
+            },
+            ComprobanteRepository(sesion),
+        )
+
+    app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio
+    yield cliente
+    del app.dependency_overrides[obtener_servicio_de_cuentas_correo]

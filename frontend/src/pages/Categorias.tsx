@@ -12,7 +12,7 @@ function mensajeDeError(error: unknown): string {
 }
 
 export function Categorias({ usuarioId, onIrAConectar }: { usuarioId: number; onIrAConectar: () => void }) {
-  const { cargando: cargandoCuenta, cuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
+  const { cargando: cargandoCuenta, hayCuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
   const [categorias, setCategorias] = useState<Categoria[] | null>(null);
   const [comercios, setComercios] = useState<ComercioClasificado[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,14 +28,14 @@ export function Categorias({ usuarioId, onIrAConectar }: { usuarioId: number; on
   }, [usuarioId]);
 
   useEffect(() => {
-    if (!cuentaActiva) return;
+    if (!hayCuentaActiva) return;
     let cancelado = false;
     // Reinicio deliberado antes de recargar: evita mostrar comercios
-    // obsoletos mientras el fetch para la nueva cuenta está en curso.
+    // obsoletos mientras el fetch para el nuevo usuario está en curso.
     // oxlint-disable-next-line react/set-state-in-effect
     setComercios(null);
     api
-      .listarComercios(usuarioId, cuentaActiva.id)
+      .listarComercios(usuarioId)
       .then((c) => {
         if (!cancelado) setComercios(c);
       })
@@ -45,7 +45,7 @@ export function Categorias({ usuarioId, onIrAConectar }: { usuarioId: number; on
     return () => {
       cancelado = true;
     };
-  }, [usuarioId, cuentaActiva]);
+  }, [usuarioId, hayCuentaActiva]);
 
   async function crearCategoria() {
     const nombre = nuevaCategoria.trim();
@@ -112,7 +112,7 @@ export function Categorias({ usuarioId, onIrAConectar }: { usuarioId: number; on
     return <p className="vacio">Cargando…</p>;
   }
 
-  if (!cuentaActiva) {
+  if (!hayCuentaActiva) {
     return (
       <div className="card stack" style={{ maxWidth: 480 }}>
         <div className="section-title">Todavía no hay ningún buzón vinculado</div>

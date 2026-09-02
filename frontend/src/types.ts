@@ -66,6 +66,18 @@ export interface ResumenFinanciero {
   por_mes: ResumenMensual[];
 }
 
+/** Un comprobante combinado de varias cuentas, marcado con de cuál salió. */
+export interface ComprobanteConFuente extends ComprobanteParseado {
+  cuenta_correo_id: number;
+  proveedor: Proveedor;
+  direccion_cuenta: string;
+}
+
+export interface ResumenFinancieroConFuente {
+  comprobantes: ComprobanteConFuente[];
+  por_mes: ResumenMensual[];
+}
+
 export interface Categoria {
   id: number;
   usuario_id: number;

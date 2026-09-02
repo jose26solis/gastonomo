@@ -12,7 +12,7 @@ function mensajeDeError(error: unknown): string {
 const HOY = new Date();
 
 export function Presupuestos({ usuarioId, onIrAConectar }: { usuarioId: number; onIrAConectar: () => void }) {
-  const { cargando: cargandoCuenta, cuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
+  const { cargando: cargandoCuenta, hayCuentaActiva, error: errorCuenta } = useCuentaActiva(usuarioId);
   const [anio, setAnio] = useState(HOY.getFullYear());
   const [mes, setMes] = useState(HOY.getMonth() + 1);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -33,14 +33,14 @@ export function Presupuestos({ usuarioId, onIrAConectar }: { usuarioId: number; 
   }, [usuarioId]);
 
   useEffect(() => {
-    if (!cuentaActiva) return;
+    if (!hayCuentaActiva) return;
     let cancelado = false;
     // Reinicio deliberado antes de recargar: evita mostrar estados
     // obsoletos mientras el fetch para el nuevo período está en curso.
     // oxlint-disable-next-line react/set-state-in-effect
     setEstados(null);
     api
-      .estadoDePresupuestos(usuarioId, cuentaActiva.id, anio, mes)
+      .estadoDePresupuestos(usuarioId, anio, mes)
       .then((e) => {
         if (!cancelado) setEstados(e);
       })
@@ -50,7 +50,7 @@ export function Presupuestos({ usuarioId, onIrAConectar }: { usuarioId: number; 
     return () => {
       cancelado = true;
     };
-  }, [usuarioId, cuentaActiva, anio, mes, recargaClave]);
+  }, [usuarioId, hayCuentaActiva, anio, mes, recargaClave]);
 
   async function guardarPresupuesto() {
     if (!categoriaNueva || !montoNuevo) return;
@@ -91,7 +91,7 @@ export function Presupuestos({ usuarioId, onIrAConectar }: { usuarioId: number; 
   if (cargandoCuenta) {
     return <p className="vacio">Cargando…</p>;
   }
-  if (!cuentaActiva) {
+  if (!hayCuentaActiva) {
     return (
       <div className="card stack" style={{ maxWidth: 480 }}>
         <div className="section-title">Todavía no hay ningún buzón vinculado</div>
