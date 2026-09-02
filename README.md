@@ -37,7 +37,7 @@ El **Laboratorio 2** entrega **la capa de datos completa**, con persistencia pol
 | Esquema PostgreSQL en 3FN con migraciones Flyway `V1`…`V5`, restricciones e índices justificados | [`db/postgres/migrations/`](db/postgres/migrations/) |
 | Subdominio en MongoDB: la colección `bitacora_compras`, con la decisión de incrustar justificada | [`db/mongo/init/`](db/mongo/init/) · [ADR-002](docs/adr/ADR-002-subdominio-documental-en-mongodb.md) |
 | Datos de ejemplo realistas en las dos bases | [`db/postgres/seeds/`](db/postgres/seeds/) · [`db/mongo/init/02_datos_de_ejemplo.js`](db/mongo/init/02_datos_de_ejemplo.js) |
-| Docker Compose que levanta PostgreSQL y MongoDB con un solo comando | [`docker-compose.yml`](docker-compose.yml) |
+| Docker Compose que levanta PostgreSQL y MongoDB con un solo comando (`--profile flyway`, ver más abajo) | [`docker-compose.yml`](docker-compose.yml) |
 | Documento técnico del modelo y las decisiones de diseño | [Modelo de datos](docs/modelo-de-datos.md) |
 
 En números: **12 tablas · 17 llaves foráneas · 17 restricciones `UNIQUE` · 42 `CHECK` · 46 índices**
@@ -68,10 +68,22 @@ Necesitás **Docker Desktop**. Desde la raíz del repositorio:
 docker compose up -d
 ```
 
-Eso levanta PostgreSQL, aplica las cinco migraciones de Flyway con sus datos de ejemplo, y levanta
-MongoDB con la colección `bitacora_compras` creada, validada, indexada y sembrada. No hay que
-configurar nada más: las credenciales de desarrollo vienen como valores por defecto (para cambiarlas,
-copiá `.env.ejemplo` a `.env`).
+Eso levanta PostgreSQL y MongoDB -sin Flyway. No hay que configurar nada más: las credenciales de
+desarrollo vienen como valores por defecto (para cambiarlas, copiá `.env.ejemplo` a `.env`).
+
+> **Por qué Flyway queda afuera de este comando:** migra el modelo original de la propuesta de
+> dominio (`db/postgres/migrations/`) sobre el mismo PostgreSQL que usa la aplicación en ejecución
+> -y sus tablas chocan por nombre con las que la aplicación crea sola (ver
+> [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite)). Para levantar el
+> Laboratorio 2 tal como se entregó, en un volumen limpio y aparte del que usa la aplicación:
+>
+> ```bash
+> docker compose down -v            # si tenías Postgres con el esquema de la aplicación
+> docker compose --profile flyway up -d
+> ```
+>
+> Eso sí aplica las cinco migraciones con sus datos de ejemplo, y levanta MongoDB con la colección
+> `bitacora_compras` creada, validada, indexada y sembrada.
 
 Comprobá que todo quedó arriba:
 
@@ -79,8 +91,9 @@ Comprobá que todo quedó arriba:
 docker compose ps -a
 ```
 
-`gastonomo-postgres` y `gastonomo-mongo` deben decir `Up (healthy)`, y **`gastonomo-flyway` debe
-decir `Exited (0)`**: es una tarea que migra y se apaga, no un servicio.
+`gastonomo-postgres` y `gastonomo-mongo` deben decir `Up (healthy)`. Si además levantaste el
+perfil `flyway`, `gastonomo-flyway` debe decir `Exited (0)`: es una tarea que migra y se apaga, no
+un servicio.
 
 Mirá los datos de PostgreSQL:
 
@@ -169,13 +182,14 @@ también en integración continua, que no levanta Docker.
 
 ### Conectarla a PostgreSQL en vez de SQLite
 
-Con `docker compose up -d postgres` corriendo (ver [Cómo levantar las bases de
+Con `docker compose up -d` corriendo (ver [Cómo levantar las bases de
 datos](#cómo-levantar-las-bases-de-datos)), esta misma aplicación puede usar esa base en lugar del
 archivo local. Es la propia `Base.metadata.create_all()` la que crea las tablas -el esquema que
 migra Flyway (`db/postgres/migrations/`) es el modelo original de la propuesta de dominio, un
-ejercicio aparte del Laboratorio 2 que no comparte base con la app en ejecución: si ya corriste
-Flyway sobre esa base, hay que vaciar el esquema primero (`DROP SCHEMA public CASCADE; CREATE
-SCHEMA public;`) porque los nombres de tabla chocan.
+ejercicio aparte del Laboratorio 2 que no comparte base con la app en ejecución. Por eso Flyway no
+corre con el `docker compose up -d` normal (ver el comentario al inicio de `docker-compose.yml`):
+si alguna vez levantaste el perfil `flyway` contra esta misma base, hay que vaciar el esquema
+primero (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`) porque los nombres de tabla chocan.
 
 En el `.env` (copiado de `.env.ejemplo`):
 
@@ -472,9 +486,9 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
       releen del proveedor en cada petición. Ver
       [Caché de comprobantes](#caché-de-comprobantes-y-sincronización-incremental).
 - [x] **La aplicación puede correr sobre PostgreSQL** *(adelantado)* — `GASTONOMO_URL_BASE_DATOS`
-      la conecta al Postgres de `docker compose up -d postgres` en vez de SQLite, con su propio
-      esquema (no el de Flyway). Ver
-      [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite).
+      la conecta al Postgres de `docker compose up -d` en vez de SQLite, con su propio esquema
+      (Flyway, el del Laboratorio 2, queda detrás de un perfil aparte a propósito -no compiten por
+      la misma base). Ver [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite).
 
 Pendiente:
 
