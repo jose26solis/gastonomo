@@ -24,10 +24,13 @@ FabricaDeSesiones = sessionmaker(bind=motor, autoflush=False, expire_on_commit=F
 
 
 def crear_tablas() -> None:
-    """Crea el esquema si no existe.
+    """Crea el esquema si no existe, en SQLite o en PostgreSQL según `url_base_datos`.
 
-    Sirve para el Laboratorio 1. Cuando el proyecto pase a PostgreSQL, este paso
-    lo reemplazan las migraciones de Alembic descritas en el ADR-001.
+    No hay migraciones versionadas para este esquema todavía: `create_all`
+    crea lo que falte pero nunca altera una columna existente, así que un
+    cambio de modelo no se propaga solo a una base que ya tenía la tabla
+    vieja. Mientras el proyecto siga en una sola persona por ambiente esto
+    alcanza; herramientas como Alembic entran cuando eso deje de ser cierto.
     """
     Base.metadata.create_all(bind=motor)
 

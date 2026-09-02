@@ -164,8 +164,26 @@ siguiente (bandeja al día) menos de 1s.
 ## Cómo correr la aplicación
 
 Necesitás **Python 3.12 o superior** (nosotros usamos 3.14). **No hace falta Docker para esta
-parte**: la aplicación sigue usando SQLite local y crea el archivo sola al arrancar. Conectarla a las
-bases de arriba es trabajo de un laboratorio siguiente.
+parte**: por defecto la aplicación usa SQLite local y crea el archivo sola al arrancar -así arranca
+también en integración continua, que no levanta Docker.
+
+### Conectarla a PostgreSQL en vez de SQLite
+
+Con `docker compose up -d postgres` corriendo (ver [Cómo levantar las bases de
+datos](#cómo-levantar-las-bases-de-datos)), esta misma aplicación puede usar esa base en lugar del
+archivo local. Es la propia `Base.metadata.create_all()` la que crea las tablas -el esquema que
+migra Flyway (`db/postgres/migrations/`) es el modelo original de la propuesta de dominio, un
+ejercicio aparte del Laboratorio 2 que no comparte base con la app en ejecución: si ya corriste
+Flyway sobre esa base, hay que vaciar el esquema primero (`DROP SCHEMA public CASCADE; CREATE
+SCHEMA public;`) porque los nombres de tabla chocan.
+
+En el `.env` (copiado de `.env.ejemplo`):
+
+```bash
+GASTONOMO_URL_BASE_DATOS=postgresql+psycopg://gastonomo:gastonomo_local@localhost:5432/gastonomo
+```
+
+Sin esa variable, sigue usando SQLite exactamente como antes.
 
 ### 1. Clonar y crear el entorno virtual
 
@@ -453,10 +471,14 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
 - [x] **Caché local y sincronización incremental** *(adelantado)* — los comprobantes ya no se
       releen del proveedor en cada petición. Ver
       [Caché de comprobantes](#caché-de-comprobantes-y-sincronización-incremental).
+- [x] **La aplicación puede correr sobre PostgreSQL** *(adelantado)* — `GASTONOMO_URL_BASE_DATOS`
+      la conecta al Postgres de `docker compose up -d postgres` en vez de SQLite, con su propio
+      esquema (no el de Flyway). Ver
+      [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite).
 
 Pendiente:
 
-- [ ] Conectar la aplicación (hoy sobre SQLite) a PostgreSQL y MongoDB, ya con su esquema listo
+- [ ] Conectar la aplicación a MongoDB para lo que corresponda al subdominio documental
 - [ ] Vinculación de Gmail en el frontend (el backend ya soporta el proveedor)
 - [ ] Sumar otros bancos además de BAC, contra una notificación real de cada uno
 - [ ] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una

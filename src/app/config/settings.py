@@ -61,9 +61,15 @@ class Configuracion:
 def obtener_configuracion() -> Configuracion:
     """Arma la configuracion desde el ambiente, con valores por defecto de desarrollo.
 
-    En el Laboratorio 1 la base por defecto es un archivo SQLite local, para que el
-    proyecto corra sin instalar ningun servidor de base de datos. La variable
-    GASTONOMO_URL_BASE_DATOS es la que despues apuntara a PostgreSQL.
+    Por defecto la base es un archivo SQLite local, para que el proyecto corra
+    sin instalar nada y para que la integracion continua -que no levanta
+    Docker- siga arrancando la app tal cual. Con 'docker compose up -d
+    postgres' corriendo, GASTONOMO_URL_BASE_DATOS en el .env apunta esta misma
+    aplicacion a esa base en su lugar; ver la seccion de PostgreSQL del
+    README. El esquema lo sigue creando `crear_tablas()` desde los modelos de
+    SQLAlchemy -es un esquema propio de la aplicacion, no el que migran las
+    migraciones de Flyway de docs/adr/ADR-003, que entregan el modelo de
+    dominio original del Laboratorio 2 como un ejercicio aparte.
 
     Las credenciales de Outlook y Gmail no tienen un valor de desarrollo posible:
     cada integrante tiene que registrar su propia app en Azure y en Google Cloud
