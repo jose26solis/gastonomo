@@ -143,6 +143,22 @@ Dos decisiones de dominio que valen la pena explicar:
   proceso transaccional que vaya actualizando un consumo guardado, así que no había honestidad en
   fingir que ese número persiste.
 
+### Caché de comprobantes y sincronización incremental
+
+Hasta hace poco, cada una de estas pantallas releía y reparseaba la bandeja completa del proveedor
+en cada petición: con ~110 mensajes, eso son ~110 peticiones HTTP a Microsoft por cada carga de
+pantalla, siempre -tuviera o no correo nuevo. Ahora el resultado de parsear cada mensaje se guarda
+una sola vez en `Comprobante` ([`comprobante.py`](src/app/data/models/comprobante.py)), con
+`mensaje_id` como clave de deduplicación: sincronizar una bandeja ya al día no vuelve a pedirle el
+cuerpo a ningún mensaje, solo lista metadatos para ver si hay algo nuevo. `resumen_financiero`
+-de donde salen comercios, presupuestos y los tres reportes- sincroniza sola antes de leer, así
+que ninguna pantalla necesitó cambiar para beneficiarse. El endpoint
+`POST /cuentas-correo/{id}/sincronizar` existe aparte para forzar el pull y confirmar cuánto trajo
+de nuevo.
+
+En números, contra un buzón real de ~113 comprobantes: primera carga (bandeja vacía) ~24s, carga
+siguiente (bandeja al día) menos de 1s.
+
 ---
 
 ## Cómo correr la aplicación
@@ -216,7 +232,8 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/cuentas-correo?usuario_id=1` | Lista los buzones vinculados de un usuario |
 | `GET` | `/api/cuentas-correo/{id}/probar?usuario_id=1` | Trae los últimos mensajes, para confirmar que el token sirve |
 | `GET` | `/api/cuentas-correo/{id}/comprobante?usuario_id=1&mensaje_id=…` | Lee y parsea el comprobante de un mensaje puntual |
-| `GET` | `/api/cuentas-correo/{id}/resumen-financiero?usuario_id=1` | Lee los comprobantes reales de BAC y los suma por mes |
+| `GET` | `/api/cuentas-correo/{id}/resumen-financiero?usuario_id=1` | Sincroniza lo nuevo y suma por mes los comprobantes ya cacheados |
+| `POST` | `/api/cuentas-correo/{id}/sincronizar?usuario_id=1` | Fuerza el pull de correo nuevo, sin pedir además todo el resumen |
 | `GET` | `/api/cuentas-correo/{id}/comercios?usuario_id=1` | Resuelve y clasifica los comercios de esos comprobantes |
 | `GET` | `/api/cuentas-correo/{id}/presupuestos?usuario_id=1&anio=2026&mes=9` | Estado de los presupuestos del período, contra el gasto real de ese mismo período |
 | `GET` | `/api/cuentas-correo/{id}/reportes/movimientos.csv?usuario_id=1` | Exporta los movimientos reconocidos a CSV |
@@ -270,8 +287,8 @@ src/app/
 │
 ├── data/           → Entidades y consultas. No contiene reglas de negocio.
 │   ├── models/          usuario.py · categoria.py · cuenta_correo.py · comercio.py ·
-│   │                    comercio_categoria_sugerida.py · presupuesto.py · base.py ·
-│   │                    enums.py · tipos.py
+│   │                    comercio_categoria_sugerida.py · presupuesto.py · comprobante.py ·
+│   │                    base.py · enums.py · tipos.py
 │   └── repositories/    el único lugar del sistema que consulta datos
 │
 ├── config/         → Lo que cambia entre máquinas.
@@ -383,8 +400,10 @@ vinculado, estas pantallas quedan disponibles:
 | **Bancos** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
 | **Ajustes** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
 
-Cada pantalla con datos reales relee el buzón completo en cada carga -no hay caché todavía-, así
-que puede tardar varios segundos con muchos comprobantes.
+Cada comprobante de BAC se lee y se guarda una sola vez -ver
+[Caché de comprobantes](#caché-de-comprobantes-y-sincronización-incremental) más abajo. La primera
+carga de un buzón nuevo puede tardar varios segundos; las siguientes, con la bandeja ya al día,
+son casi instantáneas.
 
 ---
 
@@ -431,13 +450,17 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
       Ver [Funcionalidades adelantadas](#funcionalidades-adelantadas-clasificación-presupuestos-y-reportes).
 - [x] **Frontend completo** *(adelantado)* — siete pantallas; cinco con datos reales, dos marcadas
       explícitamente como prototipo. Ver [Correr el frontend](#correr-el-frontend).
+- [x] **Caché local y sincronización incremental** *(adelantado)* — los comprobantes ya no se
+      releen del proveedor en cada petición. Ver
+      [Caché de comprobantes](#caché-de-comprobantes-y-sincronización-incremental).
 
 Pendiente:
 
 - [ ] Conectar la aplicación (hoy sobre SQLite) a PostgreSQL y MongoDB, ya con su esquema listo
 - [ ] Vinculación de Gmail en el frontend (el backend ya soporta el proveedor)
 - [ ] Sumar otros bancos además de BAC, contra una notificación real de cada uno
-- [ ] Proceso transaccional de ingesta: conciliar y guardar el consumo del presupuesto en vez de
-      recalcularlo leyendo todo el correo en cada petición
+- [ ] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
+      `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
+      `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
 - [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
-- [ ] Pruebas automatizadas de frontend (el backend tiene 133 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 136 pruebas; el frontend, ninguna todavía)
