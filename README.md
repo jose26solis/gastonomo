@@ -50,10 +50,13 @@ SQLite**: conectarla a estas dos bases es trabajo de un laboratorio siguiente.
 El dominio completo está diseñado y documentado en la
 [Propuesta de Dominio](docs/propuesta-dominio.md).
 
-> **Nota:** por decisión del equipo se adelantó la vinculación de buzones de correo (Outlook y
-> Gmail) fuera del orden de los laboratorios, para validar contra un banco real que la ingesta es
-> viable. Queda descrita en su propia sección más abajo y no es parte de lo que exige el
-> Laboratorio 1.
+> **Nota:** por decisión del equipo se adelantó, fuera del orden de los laboratorios, todo el
+> Proceso 2 del dominio sobre la base SQLite actual: vinculación de correo, lectura y clasificación
+> de comprobantes reales de BAC, presupuestos con estado en vivo, reportes exportables y el
+> frontend completo. Se hizo para validar contra un banco real -no contra datos inventados- que
+> todo el recorrido de punta a punta funciona. Queda descrito en la sección
+> [Funcionalidades adelantadas](#funcionalidades-adelantadas-clasificación-presupuestos-y-reportes)
+> más abajo y no es parte de lo que exige el Laboratorio 2.
 
 ---
 
@@ -111,6 +114,34 @@ colección:
 ```bash
 docker compose exec -T mongo mongosh --quiet -u gastonomo -p gastonomo_local --authenticationDatabase admin gastonomo < db/pruebas/validador_mongo.js
 ```
+
+---
+
+## Funcionalidades adelantadas: clasificación, presupuestos y reportes
+
+Todo esto corre hoy sobre la base SQLite del Laboratorio 1, contra correo real de BAC Credomatic
+-no contra datos de ejemplo-, y es la parte del sistema que va más allá de lo que exige el
+Laboratorio 2:
+
+| Funcionalidad | Qué hace | Dónde está |
+|---|---|---|
+| Resumen financiero | Lee los comprobantes reales de BAC de un buzón vinculado y los suma por mes y moneda, sin mezclar monedas | [`resumen_service.py`](src/app/business/services/resumen_service.py) |
+| Comercios y categorías | Normaliza el nombre del comercio, sugiere su categoría según lo que ese usuario ya clasificó antes (por usuario, no global) y deja confirmar o corregir | [`comercio_service.py`](src/app/business/services/comercio_service.py) |
+| Presupuestos | Límite mensual por categoría; el consumo se calcula en vivo contra el gasto real de ese mismo período (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`), nunca se guarda como un número aparte | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
+| Reportes exportables | Movimientos en CSV y Excel, resumen del mes más reciente en PDF | [`reportes.py`](src/app/presentation/routers/reportes.py) |
+| Frontend completo | Siete pantallas con datos reales o marcadas explícitamente como ejemplo | ver [Correr el frontend](#correr-el-frontend) |
+
+Dos decisiones de dominio que valen la pena explicar:
+
+- **La categoría sugerida de un comercio es por usuario, no global.** Aunque el catálogo de
+  comercios (`Comercio`) se comparte entre todos, lo que cada quien clasifica como "Alimentación"
+  o "Transporte" es suyo -dos personas pueden categorizar el mismo supermercado distinto. Por eso
+  existe `ComercioCategoriaSugerida` como tabla intermedia por `(usuario, comercio)`, en vez de un
+  campo `categoria_sugerida` directo en `Comercio`.
+- **Un presupuesto solo guarda su límite.** `monto_consumido` y su estado se calculan en cada
+  petición combinando el límite con los comprobantes reales del período -no existe todavía un
+  proceso transaccional que vaya actualizando un consumo guardado, así que no había honestidad en
+  fingir que ese número persiste.
 
 ---
 
@@ -184,10 +215,22 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/cuentas-correo/gmail/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Gmail |
 | `GET` | `/api/cuentas-correo?usuario_id=1` | Lista los buzones vinculados de un usuario |
 | `GET` | `/api/cuentas-correo/{id}/probar?usuario_id=1` | Trae los últimos mensajes, para confirmar que el token sirve |
+| `GET` | `/api/cuentas-correo/{id}/comprobante?usuario_id=1&mensaje_id=…` | Lee y parsea el comprobante de un mensaje puntual |
+| `GET` | `/api/cuentas-correo/{id}/resumen-financiero?usuario_id=1` | Lee los comprobantes reales de BAC y los suma por mes |
+| `GET` | `/api/cuentas-correo/{id}/comercios?usuario_id=1` | Resuelve y clasifica los comercios de esos comprobantes |
+| `GET` | `/api/cuentas-correo/{id}/presupuestos?usuario_id=1&anio=2026&mes=9` | Estado de los presupuestos del período, contra el gasto real de ese mismo período |
+| `GET` | `/api/cuentas-correo/{id}/reportes/movimientos.csv?usuario_id=1` | Exporta los movimientos reconocidos a CSV |
+| `GET` | `/api/cuentas-correo/{id}/reportes/movimientos.xlsx?usuario_id=1` | Exporta los movimientos reconocidos a Excel |
+| `GET` | `/api/cuentas-correo/{id}/reportes/resumen.pdf?usuario_id=1` | Exporta un reporte del mes más reciente en PDF |
 | `DELETE` | `/api/cuentas-correo/{id}?usuario_id=1` | Desvincula un buzón |
+| `POST` | `/api/comercios/{id}/categoria` | Asigna o corrige la categoría sugerida de un comercio, para ese usuario |
+| `POST` | `/api/presupuestos` | Crea o corrige el presupuesto de una categoría y período |
+| `GET` | `/api/presupuestos?usuario_id=1&anio=2026&mes=9` | Lista los presupuestos guardados de un período |
+| `DELETE` | `/api/presupuestos/{id}?usuario_id=1` | Elimina un presupuesto |
 
-Los tres primeros no necesitan nada extra. Los de `/api/cuentas-correo` sí requieren credenciales
-de Microsoft/Google — ver la sección **Vinculación de correo** más abajo.
+Los tres primeros no necesitan nada extra. Todo lo que empieza con `/api/cuentas-correo/{id}/…`
+necesita un buzón ya vinculado con credenciales reales de Microsoft/Google — ver la sección
+**Vinculación de correo** más abajo.
 
 ### 5. Correr las pruebas y el linter
 
@@ -212,19 +255,23 @@ Arquitectura en tres capas más configuración. La regla de oro:
 ```
 src/app/
 ├── presentation/   → Habla HTTP. Recibe JSON, llama al servicio, devuelve JSON.
-│   ├── routers/        salud.py · categorias.py · cuentas_correo.py
+│   ├── routers/        salud.py · categorias.py · cuentas_correo.py · comercios.py ·
+│   │                   presupuestos.py · reportes.py
 │   ├── schemas.py      DTOs de entrada y salida
 │   └── dependencies.py arma los servicios con sus repositorios
 │
 ├── business/       → Reglas del negocio. No sabe que existe HTTP.
-│   ├── services/        categoria_service.py · cuenta_correo_service.py
+│   ├── services/        categoria_service.py · cuenta_correo_service.py ·
+│   │                    comercio_service.py · presupuesto_service.py · resumen_service.py
 │   │   └── correo/      proveedor.py · outlook.py · gmail.py (hablan con Microsoft/Google)
 │   ├── parsers/          comprobante_bac.py (lee notificaciones de BAC con regex)
 │   ├── seguridad/        cifrado.py (cifra los tokens antes de guardarlos)
 │   └── errors.py        violaciones de reglas del dominio
 │
 ├── data/           → Entidades y consultas. No contiene reglas de negocio.
-│   ├── models/          usuario.py · categoria.py · cuenta_correo.py · base.py · enums.py · tipos.py
+│   ├── models/          usuario.py · categoria.py · cuenta_correo.py · comercio.py ·
+│   │                    comercio_categoria_sugerida.py · presupuesto.py · base.py ·
+│   │                    enums.py · tipos.py
 │   └── repositories/    el único lugar del sistema que consulta datos
 │
 ├── config/         → Lo que cambia entre máquinas.
@@ -235,7 +282,7 @@ src/app/
 └── main.py         → Arma la app, CORS, y traduce errores de negocio a códigos HTTP.
 ```
 
-El frontend vive aparte, en [`frontend/`](frontend/) — ver la sección de abajo.
+El frontend vive aparte, en [`frontend/`](frontend/) — ver [Correr el frontend](#correr-el-frontend).
 
 Tres decisiones sostienen la separación, ya que Python no la impone por sí solo:
 
@@ -249,12 +296,15 @@ Tres decisiones sostienen la separación, ya que Python no la impone por sí sol
 
 ## Vinculación de correo (Outlook y Gmail)
 
-El sistema puede vincular un buzón de Outlook o de Gmail vía OAuth2 y, una vez vinculado, leer sus
-mensajes recientes para confirmar que el token sirve. Es la base del Proceso 2 de ingesta de
-comprobantes, descrito en la [Propuesta de Dominio](docs/propuesta-dominio.md); el parseo del
-comprobante en sí ya está resuelto y probado contra una notificación real de BAC en
-[`business/parsers/comprobante_bac.py`](src/app/business/parsers/comprobante_bac.py), pero
-todavía no está conectado al flujo de vinculación.
+El sistema vincula un buzón de Outlook o de Gmail vía OAuth2 y, una vez vinculado, lee sus
+mensajes de BAC Credomatic, los parsea con
+[`business/parsers/comprobante_bac.py`](src/app/business/parsers/comprobante_bac.py) y arma con
+eso el resumen financiero, la clasificación por comercio, el estado de los presupuestos y los
+reportes exportables -ver [Funcionalidades adelantadas](#funcionalidades-adelantadas-clasificación-presupuestos-y-reportes)
+más arriba. Es la base del Proceso 2 de ingesta de comprobantes descrito en la
+[Propuesta de Dominio](docs/propuesta-dominio.md); lo que falta de ese proceso es la parte
+transaccional -conciliar contra un presupuesto guardado en vez de calcularlo al vuelo, y sumar
+otros bancos además de BAC.
 
 ### Por qué el frontend es dueño del `redirect_uri`
 
@@ -315,13 +365,26 @@ npm install
 npm run dev
 ```
 
-Abre en `http://localhost:5173`. Deja poner un `usuario_id` (por ahora no hay login: el
-Laboratorio 1 siembra el usuario de demostración con id `1`), vincular Outlook o Gmail, ver los
-buzones vinculados, probar la conexión trayendo sus últimos mensajes, y desvincular.
+Abre en `http://localhost:5173`. Por ahora no hay login: se elige un `usuario_id` desde el
+encabezado (el Laboratorio 1 siembra el usuario de demostración con id `1`).
 
-Sin credenciales configuradas, el botón de conectar igual redirige a Microsoft/Google real, que
-rechaza la solicitud con un error legible (`unauthorized_client`) — es la forma de confirmar que
-el flujo está bien armado antes de tener las credenciales a mano.
+Sin credenciales de Microsoft/Google configuradas, el botón de conectar igual redirige al proveedor
+real, que rechaza la solicitud con un error legible (`unauthorized_client`) — es la forma de
+confirmar que el flujo está bien armado antes de tener las credenciales a mano. Con un buzón real
+vinculado, estas pantallas quedan disponibles:
+
+| Pantalla | Con qué datos trabaja |
+|---|---|
+| **Resumen** | Gasto real del mes, tendencia, top comercios y calendario, extraídos en vivo del buzón vinculado |
+| **Categorías** | Categorías reales del usuario; comercios ya clasificados agrupados por categoría, y los pendientes de clasificar |
+| **Presupuestos** | Alta y baja de presupuestos reales por categoría y período, con su estado calculado contra el gasto real |
+| **Reportes** | Descarga de CSV, Excel y PDF de los movimientos reales |
+| **Conectar correo** | Vincular o desvincular Outlook y Gmail |
+| **Bancos** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
+| **Ajustes** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
+
+Cada pantalla con datos reales relee el buzón completo en cada carga -no hay caché todavía-, así
+que puede tardar varios segundos con muchos comprobantes.
 
 ---
 
@@ -356,15 +419,25 @@ El curso son siete laboratorios incrementales sobre esta misma base. Todavía no
 contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle número.
 
 - [x] **Laboratorio 1** *(entregado)* — Arquitectura por capas, `Usuario` y `Categoria`, propuesta de dominio, CI
-- [x] **Vinculación OAuth2 de buzones** *(adelantado, fuera de orden)* — Outlook y Gmail, backend y
-      primera pantalla de frontend. Ver [Vinculación de correo](#vinculación-de-correo-outlook-y-gmail).
-- [x] **Parser de comprobantes de BAC** *(adelantado)* — probado contra una notificación real,
+- [x] **Laboratorio 2** *(entregado)* — Capa de datos completa: PostgreSQL con Flyway, subdominio
+      documental en MongoDB, restricciones e índices probados. Ver
+      [Qué incluye este laboratorio](#qué-incluye-este-laboratorio).
+- [x] **Vinculación OAuth2 de buzones** *(adelantado, fuera de orden)* — Outlook y Gmail.
+      Ver [Vinculación de correo](#vinculación-de-correo-outlook-y-gmail).
+- [x] **Parser de comprobantes de BAC** *(adelantado)* — probado contra notificaciones reales,
       confianza 1.0 en los ocho campos. [`comprobante_bac.py`](src/app/business/parsers/comprobante_bac.py)
+- [x] **Clasificación por comercio, presupuestos y reportes** *(adelantado)* — contra correo real,
+      con estado de presupuesto calculado en vivo y exportación a CSV/Excel/PDF.
+      Ver [Funcionalidades adelantadas](#funcionalidades-adelantadas-clasificación-presupuestos-y-reportes).
+- [x] **Frontend completo** *(adelantado)* — siete pantallas; cinco con datos reales, dos marcadas
+      explícitamente como prototipo. Ver [Correr el frontend](#correr-el-frontend).
 
-Pendiente para los laboratorios siguientes:
+Pendiente:
 
-- [ ] PostgreSQL con migraciones y las nueve entidades restantes del dominio
-- [ ] Resto del frontend React: catálogo de categorías, compras, presupuestos con avance en vivo
-- [ ] Proceso transaccional de ingesta: conectar el parser de BAC (y sumar otros bancos) a las
-      cuentas ya vinculadas, con conciliación y actualización de presupuesto
-- [ ] Autenticación y roles (titular, administrador)
+- [ ] Conectar la aplicación (hoy sobre SQLite) a PostgreSQL y MongoDB, ya con su esquema listo
+- [ ] Vinculación de Gmail en el frontend (el backend ya soporta el proveedor)
+- [ ] Sumar otros bancos además de BAC, contra una notificación real de cada uno
+- [ ] Proceso transaccional de ingesta: conciliar y guardar el consumo del presupuesto en vez de
+      recalcularlo leyendo todo el correo en cada petición
+- [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
+- [ ] Pruebas automatizadas de frontend (el backend tiene 133 pruebas; el frontend, ninguna todavía)
