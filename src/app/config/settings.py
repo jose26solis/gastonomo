@@ -58,7 +58,7 @@ class Configuracion:
 
     # Servicio Web de Indicadores Economicos del Banco Central de Costa Rica
     # (tipo de cambio). A diferencia de Outlook/Gmail no es OAuth2: hay que
-    # suscribirse una sola vez en https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/ConsultaIndicadores
+    # suscribirse una sola vez en https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/Suscripcion
     # con un correo, confirmar la suscripcion desde ese correo, y guardar el
     # token que el BCCR genera. Sin estas dos variables, la conversion de
     # moneda simplemente no aparece -el resto de la aplicacion sigue

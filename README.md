@@ -186,8 +186,9 @@ del Banco Central -el tipo de cambio de referencia oficial del país, gratis y s
 tarjeta ni pago. A diferencia de Outlook y Gmail no es OAuth2: hace falta suscribirse una vez,
 igual de sencillo pero distinto:
 
-1. Suscribirse en <https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/ConsultaIndicadores> con un
-   correo.
+1. Llenar el formulario de <https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/Suscripcion>:
+   nombre, actividad (hay una opción **Estudiantes**), correo, confirmación del correo, idioma y
+   la casilla de autorización.
 2. Confirmar la suscripción desde el enlace que llega a ese correo.
 3. Copiar el token que el BCCR genera al `.env`:
 
@@ -195,6 +196,9 @@ igual de sencillo pero distinto:
    GASTONOMO_BCCR_CORREO=tu-correo@ejemplo.cr
    GASTONOMO_BCCR_TOKEN=<el token que te dio el BCCR>
    ```
+
+   Si se pierde, se recupera en
+   <https://gee.bccr.fi.cr/Indicadores/Suscripciones/UI/RecuperarToken> con el mismo correo.
 
 **Sin suscribirse también funciona.** Si faltan esas variables, o si el BCCR no responde, el
 sistema cae a la [API de indicadores del Ministerio de
