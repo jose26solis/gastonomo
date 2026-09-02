@@ -416,9 +416,15 @@ que el backend lo descifra sin tener que recordar nada entre la ida y la vuelta.
 
 1. https://console.cloud.google.com → crear proyecto → *APIs & Services* → *Library* → habilitar
    **Gmail API**.
-2. *OAuth consent screen*: tipo *External*, agregarte como *Test user*.
-3. *Credentials* → *Create credentials* → *OAuth client ID* → tipo *Web application*.
-4. Redirect URI: `http://localhost:5173/vincular/gmail/callback`.
+2. *OAuth consent screen*: tipo *External*, agregarte como *Test user* (mientras la app esté en
+   modo *Testing*, solo los correos que agregues ahí pueden autorizarla — el tuyo, el de quien
+   pruebe con vos).
+3. En esa misma pantalla, *Data Access* → *Add or Remove Scopes* → agregar
+   `https://www.googleapis.com/auth/gmail.readonly` y `.../auth/userinfo.email` (o el genérico
+   `email`) — sin este paso Google rechaza el consentimiento aunque el código pida los scopes
+   correctos; a diferencia de Azure, acá hay que declararlos en la consola, no solo en el código.
+4. *Credentials* → *Create credentials* → *OAuth client ID* → tipo *Web application*.
+5. Redirect URI: `http://localhost:5173/vincular/gmail/callback`.
 
 ### Configurar el backend
 
