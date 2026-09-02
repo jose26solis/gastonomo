@@ -45,6 +45,9 @@ export function Resumen({
   const [resumen, setResumen] = useState<ResumenFinanciero | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = "el más reciente" (comportamiento por defecto); se llena cuando
+  // el titular elige explícitamente un mes anterior en el selector.
+  const [periodoElegido, setPeriodoElegido] = useState<{ anio: number; mes: number } | null>(null);
 
   useEffect(() => {
     let cancelado = false;
@@ -112,8 +115,14 @@ export function Resumen({
       }
     }
 
-    const periodoActual = periodos[0];
-    const periodoAnterior = periodos[1] ?? null;
+    // El período que se muestra es el elegido en el selector, si sigue
+    // existiendo en los datos actuales -si no (una cuenta nueva, por
+    // ejemplo), cae al más reciente.
+    const indiceElegido = periodoElegido
+      ? periodos.findIndex((p) => p.anio === periodoElegido.anio && p.mes === periodoElegido.mes)
+      : -1;
+    const periodoActual = indiceElegido >= 0 ? periodos[indiceElegido] : periodos[0];
+    const periodoAnterior = periodos[(indiceElegido >= 0 ? indiceElegido : 0) + 1] ?? null;
     const mesActual = entradaPreferidaDelPeriodo(
       resumen.por_mes,
       periodoActual.anio,
@@ -168,8 +177,10 @@ export function Resumen({
       porDia[dia] += Number(c.monto);
     }
 
-    const movimientosRecientes = resumen.comprobantes
-      .filter(esSumable)
+    // Del período que se está viendo, no de toda la bandeja -si no, elegir
+    // un mes anterior en el selector de arriba seguiría mostrando lo último
+    // de hoy acá abajo, que es justo lo contrario de lo que se pidió ver.
+    const movimientosRecientes = [...comprobantesDelMes]
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
       .slice(0, 8);
 
@@ -196,8 +207,10 @@ export function Resumen({
       porDia,
       movimientosRecientes,
       tendencia,
+      periodos,
+      esMesActual: periodoActual.anio === periodos[0].anio && periodoActual.mes === periodos[0].mes,
     };
-  }, [resumen]);
+  }, [resumen, periodoElegido]);
 
   if (error) {
     return <p className="mensaje-error">{error}</p>;
@@ -233,11 +246,40 @@ export function Resumen({
     );
   }
 
+  const periodoActualElegido = { anio: datos.mesActual.anio, mes: datos.mesActual.mes };
+
   return (
     <div className="stack">
+      {datos.periodos.length > 1 && (
+        <div className="card" style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ fontSize: 11.5, color: "var(--color-text-dim)" }}>Período</span>
+          <select
+            value={`${periodoActualElegido.anio}-${periodoActualElegido.mes}`}
+            onChange={(e) => {
+              const [anio, mes] = e.target.value.split("-").map(Number);
+              setPeriodoElegido({ anio, mes });
+            }}
+            style={{
+              padding: "6px 8px",
+              background: "var(--color-surface-2)",
+              border: "1px solid var(--color-border)",
+              borderRadius: 8,
+              color: "var(--color-text)",
+              fontSize: 11.5,
+            }}
+          >
+            {datos.periodos.map((p) => (
+              <option key={`${p.anio}-${p.mes}`} value={`${p.anio}-${p.mes}`}>
+                {formatearMes(p.anio, p.mes)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="grid grid-4">
         <KpiCard
-          label="Gasto de este mes"
+          label={datos.esMesActual ? "Gasto de este mes" : `Gasto de ${formatearMes(datos.mesActual.anio, datos.mesActual.mes)}`}
           valor={formatearMonto(datos.totalMes, datos.mesActual.moneda)}
           delta={
             datos.deltaPct === null
@@ -255,7 +297,7 @@ export function Resumen({
         <KpiCard
           label="Promedio por compra"
           valor={formatearMonto(datos.promedioMes, datos.mesActual.moneda)}
-          delta="Este mes"
+          delta={datos.esMesActual ? "Este mes" : formatearMes(datos.mesActual.anio, datos.mesActual.mes)}
           tendenciaDelta="neutral"
         />
         <KpiCard label="Comercio más frecuente" valor={datos.comercioFrecuente} delta="Por monto acumulado" tendenciaDelta="neutral" />
