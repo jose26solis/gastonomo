@@ -30,6 +30,9 @@ class ProveedorDeCorreoFalso:
         self.direccion = direccion
         self.codigo_recibido: str | None = None
         self.token_refrescado_con: str | None = None
+        # Lo que sincronizar() no debe repetir en un segundo llamado: cada
+        # identificador queda aquí la vez que de verdad se le pidió el cuerpo.
+        self.cuerpos_leidos: list[str] = []
 
     def url_de_autorizacion(self, estado: str) -> str:
         return f"https://proveedor.falso/autorizar?state={estado}"
@@ -83,4 +86,5 @@ class ProveedorDeCorreoFalso:
     def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
         if identificador not in _CUERPOS_DE_MENSAJE:
             raise ErrorDeProveedorExterno(f"Mensaje {identificador} inexistente en la prueba.")
+        self.cuerpos_leidos.append(identificador)
         return _CUERPOS_DE_MENSAJE[identificador]

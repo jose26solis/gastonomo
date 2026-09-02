@@ -40,6 +40,7 @@ from app.presentation.schemas import (
     EstadoDePresupuestoResponse,
     IniciarVinculacionResponse,
     MensajeResumidoResponse,
+    ResultadoDeSincronizacionResponse,
     ResumenFinancieroResponse,
 )
 
@@ -182,15 +183,37 @@ def resumen_financiero(
     usuario_id: int = Query(gt=0),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> ResumenFinancieroResponse:
-    """Trae y parsea los comprobantes de BAC de la bandeja, y los suma por mes.
+    """Suma por mes los comprobantes de BAC ya sincronizados de la bandeja.
 
-    Puede tardar varios segundos con una bandeja de varios años: cada
-    comprobante es una petición aparte al proveedor de correo, y todavía no
-    hay ninguna tabla donde esto quede guardado entre una llamada y la
-    siguiente.
+    Antes de leerlos, sincroniza -pide al proveedor solo los mensajes que
+    todavía no están guardados localmente. La primera vez, con una bandeja de
+    varios años, puede tardar varios segundos; de ahí en adelante, con la
+    bandeja ya al día, es prácticamente instantáneo.
     """
     resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
     return ResumenFinancieroResponse.model_validate(resumen)
+
+
+@router.post(
+    "/{cuenta_id}/sincronizar",
+    response_model=ResultadoDeSincronizacionResponse,
+    summary="Traer explícitamente el correo nuevo de un buzón",
+)
+def sincronizar(
+    cuenta_id: int,
+    servicio: ServicioDeCuentasCorreo,
+    usuario_id: int = Query(gt=0),
+    limite: int = Query(default=200, gt=0, le=500),
+) -> ResultadoDeSincronizacionResponse:
+    """Fuerza el pull de correo nuevo, sin pedir además todo el resumen.
+
+    Todo lo demás (`resumen-financiero`, `comercios`, `presupuestos`, los
+    reportes) ya sincroniza solo antes de leer, así que usar este endpoint
+    aparte es opcional -sirve para confirmar cuánto trajo de nuevo, o para
+    un botón de "sincronizar" explícito en el frontend.
+    """
+    resultado = servicio.sincronizar(usuario_id, cuenta_id, limite)
+    return ResultadoDeSincronizacionResponse.model_validate(resultado)
 
 
 @router.get(

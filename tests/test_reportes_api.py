@@ -12,6 +12,7 @@ from app.business.services.correo.proveedor import MensajeResumido, TokensDeCorr
 from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
@@ -180,6 +181,7 @@ def test_exportar_pdf_sin_comprobantes_reconocidos_da_409(
         CuentaCorreoRepository(sesion),
         UsuarioRepository(sesion),
         {ProveedorCorreo.OUTLOOK: proveedor_vacio},
+        ComprobanteRepository(sesion),
     )
     try:
         estado = _codificar_estado(usuario.id)

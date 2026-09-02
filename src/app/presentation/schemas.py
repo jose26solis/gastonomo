@@ -132,6 +132,16 @@ class ResumenFinancieroResponse(BaseModel):
     por_mes: list[ResumenMensualResponse]
 
 
+class ResultadoDeSincronizacionResponse(BaseModel):
+    """Cuánto correo nuevo trajo una sincronización explícita."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    comprobantes_nuevos: int
+    comprobantes_totales: int
+    sincronizado_en: datetime
+
+
 class ComercioResponse(BaseModel):
     """Un comercio del catálogo compartido."""
 

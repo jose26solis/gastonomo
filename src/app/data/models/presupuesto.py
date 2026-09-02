@@ -14,13 +14,15 @@ class Presupuesto(Base):
 
     Solo guarda el **límite** -no `monto_consumido`-. La propuesta de dominio
     original lo modela como un campo que Proceso 2 va acumulando con cada
-    compra, pero esa tubería transaccional todavía no existe: hoy no hay
-    ninguna `Compra` persistida, el gasto se lee del correo real en el
-    momento. Guardar un `monto_consumido` que nada actualiza sería peor que
-    no tenerlo -quedaría desactualizado desde el primer día. En su lugar, el
-    consumo se calcula cada vez que se consulta, combinando este límite con
-    los comercios reales ya clasificados (`ComercioService.clasificar_comprobantes`)
-    del mismo período. Ver `PresupuestoService.calcular_estado`.
+    compra, pero esa tubería transaccional todavía no existe: aunque los
+    comprobantes de BAC ya se cachean localmente (`Comprobante`), no hay
+    ninguna `Compra` de negocio persistida ni un proceso de conciliación que
+    vaya sumando un consumo guardado. Guardar un `monto_consumido` que nada
+    actualiza sería peor que no tenerlo -quedaría desactualizado desde el
+    primer día. En su lugar, el consumo se calcula cada vez que se consulta,
+    combinando este límite con los comercios reales ya clasificados
+    (`ComercioService.clasificar_comprobantes`) del mismo período. Ver
+    `PresupuestoService.calcular_estado`.
     """
 
     __tablename__ = "presupuesto"

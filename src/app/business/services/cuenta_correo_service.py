@@ -12,8 +12,10 @@ from app.business.parsers.comprobante_bac import (
 from app.business.seguridad.cifrado import cifrar, descifrar
 from app.business.services.correo.proveedor import MensajeResumido, ProveedorDeCorreo
 from app.business.services.resumen_service import ResumenFinanciero, agrupar_por_mes
+from app.data.models.comprobante import Comprobante
 from app.data.models.cuenta_correo import CuentaCorreo
 from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
+from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 
@@ -25,6 +27,55 @@ class VincularCuentaComando:
     usuario_id: int
     proveedor: ProveedorCorreo
     codigo: str
+
+
+@dataclass(frozen=True)
+class ResultadoDeSincronizacion:
+    """Lo que devuelve pedir explícitamente que se traiga el correo nuevo."""
+
+    comprobantes_nuevos: int
+    comprobantes_totales: int
+    sincronizado_en: datetime
+
+
+def _fila_desde_parseado(
+    cuenta_correo_id: int, mensaje_id: str, parseado: ComprobanteParseado
+) -> Comprobante:
+    return Comprobante(
+        cuenta_correo_id=cuenta_correo_id,
+        mensaje_id=mensaje_id,
+        banco=parseado.banco,
+        comercio=parseado.comercio,
+        ciudad=parseado.ciudad,
+        pais=parseado.pais,
+        fecha=parseado.fecha,
+        marca_tarjeta=parseado.marca_tarjeta,
+        ultimos_cuatro=parseado.ultimos_cuatro,
+        autorizacion=parseado.autorizacion,
+        referencia=parseado.referencia,
+        tipo_transaccion=parseado.tipo_transaccion,
+        moneda=parseado.moneda,
+        monto=parseado.monto,
+        confianza=parseado.confianza,
+    )
+
+
+def _parseado_desde_fila(fila: Comprobante) -> ComprobanteParseado:
+    return ComprobanteParseado(
+        banco=fila.banco,
+        comercio=fila.comercio,
+        ciudad=fila.ciudad,
+        pais=fila.pais,
+        fecha=fila.fecha,
+        marca_tarjeta=fila.marca_tarjeta,
+        ultimos_cuatro=fila.ultimos_cuatro,
+        autorizacion=fila.autorizacion,
+        referencia=fila.referencia,
+        tipo_transaccion=fila.tipo_transaccion,
+        moneda=fila.moneda,
+        monto=fila.monto,
+        confianza=fila.confianza,
+    )
 
 
 class CuentaCorreoService:
@@ -42,10 +93,12 @@ class CuentaCorreoService:
         cuenta_correo_repository: CuentaCorreoRepository,
         usuario_repository: UsuarioRepository,
         proveedores: dict[ProveedorCorreo, ProveedorDeCorreo],
+        comprobante_repository: ComprobanteRepository,
     ) -> None:
         self.cuentas = cuenta_correo_repository
         self.usuarios = usuario_repository
         self.proveedores = proveedores
+        self.comprobantes = comprobante_repository
 
     def url_de_autorizacion(self, usuario_id: int, proveedor: ProveedorCorreo, estado: str) -> str:
         """Arma la URL a la que se manda al titular para que autorice el acceso."""
@@ -141,33 +194,80 @@ class CuentaCorreoService:
     def resumen_financiero(
         self, usuario_id: int, cuenta_id: int, limite: int = 200
     ) -> ResumenFinanciero:
-        """Lee y parsea los comprobantes de BAC de la bandeja, y los suma por mes.
+        """Suma por mes los comprobantes ya sincronizados de la bandeja.
 
-        Cada comprobante es una petición aparte al proveedor de correo: con
-        una bandeja de varios años esto puede tardar varios segundos, no es
-        instantáneo. Todavía no existe una tabla de `Compra` donde esto quede
-        guardado, así que se recalcula desde cero en cada llamada.
-
-        Un mensaje puntual que no se puede leer (borrado entretanto, error
-        transitorio del proveedor) se descarta y no tira abajo el resto del
-        resumen -es la misma lógica que `leer_comprobante`, repetida N veces.
+        Antes esto releía y reparseaba la bandeja completa del proveedor en
+        cada llamada -con una bandeja de varios años, varios segundos cada
+        vez. Ahora primero sincroniza (`_sincronizar_comprobantes`, que solo
+        pide al proveedor lo que todavía no está guardado) y lee el resto de
+        la caché local: la primera vez sigue tardando lo mismo que antes,
+        pero una bandeja ya al día responde casi al instante.
         """
         cuenta = self._obtener_cuenta_del_titular(usuario_id, cuenta_id)
+        self._sincronizar_comprobantes(cuenta, limite)
+
+        comprobantes = [
+            _parseado_desde_fila(fila) for fila in self.comprobantes.listar_de_cuenta(cuenta_id)
+        ]
+        return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
+
+    def sincronizar(
+        self, usuario_id: int, cuenta_id: int, limite: int = 200
+    ) -> ResultadoDeSincronizacion:
+        """Trae explícitamente el correo nuevo de un buzón y lo agrega a la caché local.
+
+        `resumen_financiero` ya sincroniza sola en cada llamada; este método
+        existe para cuando alguien quiere forzar el pull sin pedir además todo
+        el resumen, o para confirmar cuánto trajo de nuevo.
+        """
+        cuenta = self._obtener_cuenta_del_titular(usuario_id, cuenta_id)
+        nuevos = self._sincronizar_comprobantes(cuenta, limite)
+        totales = len(self.comprobantes.listar_de_cuenta(cuenta_id))
+        assert cuenta.ultima_sincronizacion is not None  # _sincronizar_comprobantes la puso
+        return ResultadoDeSincronizacion(
+            comprobantes_nuevos=nuevos,
+            comprobantes_totales=totales,
+            sincronizado_en=cuenta.ultima_sincronizacion,
+        )
+
+    def _sincronizar_comprobantes(self, cuenta: CuentaCorreo, limite: int) -> int:
+        """Trae y guarda los mensajes de BAC que la caché local todavía no tiene.
+
+        `mensaje_id` es la clave de deduplicación: un mensaje ya guardado
+        nunca vuelve a pedírsele el cuerpo al proveedor. Eso es lo que hace
+        que sincronizar una bandeja ya al día sea prácticamente instantáneo
+        -la única petición real es la de listar metadatos, no una por mensaje.
+
+        Un mensaje puntual que no se puede leer (borrado entretanto, error
+        transitorio del proveedor) se descarta y no tira abajo el resto de
+        la sincronización.
+        """
         token_acceso = self._token_acceso_vigente(cuenta)
         proveedor = self._proveedor(cuenta.proveedor)
         mensajes = proveedor.listar_mensajes_recientes(
             token_acceso, limite, remitente_contiene=DOMINIO_REMITENTE_BAC
         )
 
-        comprobantes = []
-        for mensaje in mensajes:
+        ya_guardados = self.comprobantes.mensajes_ya_sincronizados(
+            cuenta.id, [mensaje.identificador for mensaje in mensajes]
+        )
+        nuevos = [m for m in mensajes if m.identificador not in ya_guardados]
+
+        agregados = 0
+        for mensaje in nuevos:
             try:
                 cuerpo = proveedor.obtener_cuerpo_de_mensaje(token_acceso, mensaje.identificador)
             except ErrorDeProveedorExterno:
                 continue
-            comprobantes.append(parsear_comprobante_bac(cuerpo))
+            parseado = parsear_comprobante_bac(cuerpo)
+            self.comprobantes.agregar(
+                _fila_desde_parseado(cuenta.id, mensaje.identificador, parseado)
+            )
+            agregados += 1
 
-        return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
+        cuenta.ultima_sincronizacion = datetime.now(UTC)
+        self.cuentas.sesion.commit()
+        return agregados
 
     def desvincular(self, usuario_id: int, cuenta_id: int) -> None:
         """Desvincula un buzón sin borrar la cuenta del titular.

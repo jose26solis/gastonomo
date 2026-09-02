@@ -25,6 +25,7 @@ from app.data.models.enums import ProveedorCorreo
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
 from app.data.repositories.comercio_repository import ComercioRepository
+from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.presupuesto_repository import PresupuestoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
@@ -62,7 +63,10 @@ def obtener_servicio_de_cuentas_correo(
 ) -> CuentaCorreoService:
     """Arma el servicio de cuentas de correo con sus repositorios y proveedores."""
     return CuentaCorreoService(
-        CuentaCorreoRepository(sesion), UsuarioRepository(sesion), proveedores
+        CuentaCorreoRepository(sesion),
+        UsuarioRepository(sesion),
+        proveedores,
+        ComprobanteRepository(sesion),
     )
 
 

@@ -17,6 +17,7 @@ from app.config.database import obtener_sesion
 from app.data.models.base import Base
 from app.data.models.enums import Moneda, ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
@@ -94,6 +95,7 @@ def cliente_con_correo_falso(
                 ProveedorCorreo.OUTLOOK: proveedor_correo_falso,
                 ProveedorCorreo.GMAIL: proveedor_correo_falso,
             },
+            ComprobanteRepository(sesion),
         )
 
     app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio

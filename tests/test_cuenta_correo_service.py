@@ -11,6 +11,7 @@ from app.business.seguridad.cifrado import descifrar
 from app.business.services.cuenta_correo_service import CuentaCorreoService, VincularCuentaComando
 from app.data.models.enums import EstadoCuentaCorreo, Moneda, ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from tests.apoyos_correo import ProveedorDeCorreoFalso
@@ -24,6 +25,7 @@ def servicio(
         CuentaCorreoRepository(sesion),
         UsuarioRepository(sesion),
         {ProveedorCorreo.OUTLOOK: proveedor_correo_falso},
+        ComprobanteRepository(sesion),
     )
 
 
@@ -170,6 +172,41 @@ def test_resumen_financiero_lee_y_suma_solo_lo_de_bac(
     assert len(resumen.por_mes) == 1
     assert resumen.por_mes[0].total == Decimal("7870.00")
     assert resumen.por_mes[0].cantidad_transacciones == 1
+
+
+def test_resumen_financiero_no_vuelve_a_leer_un_comprobante_ya_sincronizado(
+    servicio: CuentaCorreoService,
+    usuario: Usuario,
+    proveedor_correo_falso: ProveedorDeCorreoFalso,
+) -> None:
+    """El punto de la caché: la segunda llamada no debe volver a pedir el cuerpo."""
+    cuenta = _vincular(servicio, usuario)
+
+    servicio.resumen_financiero(usuario.id, cuenta.id)
+    assert proveedor_correo_falso.cuerpos_leidos == ["1"]
+
+    resumen = servicio.resumen_financiero(usuario.id, cuenta.id)
+
+    assert proveedor_correo_falso.cuerpos_leidos == ["1"], (
+        "el segundo resumen no debio volver a pedirle el cuerpo al proveedor"
+    )
+    assert len(resumen.comprobantes) == 1
+    assert resumen.comprobantes[0].comercio == "WALMART SAN SEBASTIAN"
+
+
+def test_sincronizar_devuelve_cuantos_comprobantes_trajo_de_nuevo(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    cuenta = _vincular(servicio, usuario)
+
+    primera = servicio.sincronizar(usuario.id, cuenta.id)
+    segunda = servicio.sincronizar(usuario.id, cuenta.id)
+
+    assert primera.comprobantes_nuevos == 1
+    assert primera.comprobantes_totales == 1
+    assert segunda.comprobantes_nuevos == 0, "ya no hay nada nuevo que traer"
+    assert segunda.comprobantes_totales == 1
+    assert segunda.sincronizado_en >= primera.sincronizado_en
 
 
 def test_probar_conexion_en_una_cuenta_desvinculada_falla(

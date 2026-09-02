@@ -107,6 +107,30 @@ def test_resumen_financiero_devuelve_comprobantes_y_totales(
     assert cuerpo["por_mes"][0]["total"] == "7870.00"
 
 
+def test_sincronizar_trae_lo_nuevo_y_no_repite_en_la_segunda_llamada(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    estado = _codificar_estado(usuario.id)
+    vinculada = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    ).json()
+
+    primera = cliente_con_correo_falso.post(
+        f"/api/cuentas-correo/{vinculada['id']}/sincronizar",
+        params={"usuario_id": usuario.id},
+    )
+    segunda = cliente_con_correo_falso.post(
+        f"/api/cuentas-correo/{vinculada['id']}/sincronizar",
+        params={"usuario_id": usuario.id},
+    )
+
+    assert primera.status_code == 200
+    assert primera.json()["comprobantes_nuevos"] == 1
+    assert primera.json()["comprobantes_totales"] == 1
+    assert segunda.json()["comprobantes_nuevos"] == 0
+    assert segunda.json()["comprobantes_totales"] == 1
+
+
 def test_leer_comprobante_devuelve_los_campos_parseados(
     cliente_con_correo_falso: TestClient, usuario: Usuario
 ) -> None:
