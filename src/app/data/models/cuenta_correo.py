@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
@@ -34,8 +34,14 @@ class CuentaCorreo(Base):
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuario.id"), nullable=False, index=True)
     proveedor: Mapped[ProveedorCorreo] = mapped_column(Enum(ProveedorCorreo), nullable=False)
     direccion: Mapped[str] = mapped_column(String(180), nullable=False)
-    token_acceso_cifrado: Mapped[str | None] = mapped_column(String(2000), nullable=True)
-    token_refresco_cifrado: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Text, no String(n): un token cifrado con Fernet no tiene un largo fijo
+    # -depende de cuanto mande Microsoft o Google, que puede variar bastante-
+    # y SQLite nunca hizo respetar ningun limite aqui. Con PostgreSQL, que si
+    # lo exige de verdad, un access token real superaba los 2000 caracteres
+    # que tenia esta columna y la vinculacion fallaba con
+    # StringDataRightTruncation en el INSERT.
+    token_acceso_cifrado: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_refresco_cifrado: Mapped[str | None] = mapped_column(Text, nullable=True)
     expira_en: Mapped[datetime | None] = mapped_column(FechaHoraUTC, nullable=True)
     ultima_sincronizacion: Mapped[datetime | None] = mapped_column(FechaHoraUTC, nullable=True)
     estado: Mapped[EstadoCuentaCorreo] = mapped_column(
