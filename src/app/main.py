@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError
 
 from app.business.errors import (
     DatosInvalidos,
@@ -89,3 +90,21 @@ async def manejar_error_de_proveedor_externo(
 ) -> JSONResponse:
     """502: Microsoft o Google rechazaron la solicitud o no respondieron."""
     return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY, content={"detalle": str(error)})
+
+
+@app.exception_handler(DataError)
+async def manejar_error_de_datos(_: Request, error: DataError) -> JSONResponse:
+    """422: un valor con la forma correcta no le calza al tipo real de la columna.
+
+    Pydantic valida la forma (tipos, largos declarados), no los límites
+    exactos de cada columna -un id absurdamente grande, por ejemplo, pasa la
+    validación de FastAPI sin problema y solo revienta cuando Postgres
+    intenta convertirlo a INTEGER. Sin este manejador, cualquier `DataError`
+    de SQLAlchemy se colaba como un 500 crudo; acá se le da la forma del
+    resto de los errores de negocio, sin repetir el mensaje exacto de
+    Postgres -viene en inglés y con detalles internos que no le sirven a
+    quien llama la API.
+    """
+    return JSONResponse(
+        status_code=422, content={"detalle": "Uno de los valores enviados no es válido."}
+    )

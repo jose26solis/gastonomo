@@ -51,9 +51,12 @@ def _codificar_estado(usuario_id: int) -> str:
     return cifrar(json.dumps({"usuario_id": usuario_id}))
 
 
+_TTL_ESTADO_SEGUNDOS = 600  # 10 minutos: de sobra para completar el handshake, poco para reusar
+
+
 def _decodificar_estado(estado: str) -> int:
     try:
-        datos = json.loads(descifrar(estado))
+        datos = json.loads(descifrar(estado, ttl_segundos=_TTL_ESTADO_SEGUNDOS))
         return int(datos["usuario_id"])
     except (TokenIlegible, ValueError, KeyError, TypeError) as error:
         raise DatosInvalidos("El parametro state no es valido o expiro.") from error
@@ -66,7 +69,7 @@ def _decodificar_estado(estado: str) -> int:
 )
 def iniciar_outlook(
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> IniciarVinculacionResponse:
     """Devuelve la URL de Microsoft a la que el frontend debe redirigir al titular."""
     url = servicio.url_de_autorizacion(
@@ -98,7 +101,7 @@ def callback_outlook(
 )
 def iniciar_gmail(
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> IniciarVinculacionResponse:
     """Devuelve la URL de Google a la que el frontend debe redirigir al titular."""
     url = servicio.url_de_autorizacion(
@@ -126,7 +129,7 @@ def callback_gmail(
 @router.get("", response_model=list[CuentaCorreoResponse], summary="Listar los buzones vinculados")
 def listar_cuentas(
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> list[CuentaCorreoResponse]:
     """Lista los buzones vinculados del titular indicado."""
     return [CuentaCorreoResponse.model_validate(c) for c in servicio.listar(usuario_id)]
@@ -140,7 +143,7 @@ def listar_cuentas(
 def probar_conexion(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=5, gt=0, le=25),
 ) -> list[MensajeResumidoResponse]:
     """Trae los últimos mensajes del buzón para confirmar que el token funciona.
@@ -159,7 +162,7 @@ def probar_conexion(
 def leer_comprobante(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     mensaje_id: str = Query(min_length=1, description="Id de mensaje que devolvió /probar"),
 ) -> ComprobanteParseadoResponse:
     """Trae el cuerpo de un mensaje y lo pasa por el parser de BAC.
@@ -180,7 +183,7 @@ def leer_comprobante(
 def resumen_financiero(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> ResumenFinancieroResponse:
     """Suma por mes los comprobantes de BAC ya sincronizados de la bandeja.
@@ -202,7 +205,7 @@ def resumen_financiero(
 def sincronizar(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> ResultadoDeSincronizacionResponse:
     """Fuerza el pull de correo nuevo, sin pedir además todo el resumen.
@@ -225,7 +228,7 @@ def comercios_clasificados(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> list[ComercioClasificadoResponse]:
     """Lee los comprobantes de BAC, resuelve cada comercio en el catálogo
@@ -248,7 +251,7 @@ def presupuestos_del_periodo(
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
     servicio_presupuestos: ServicioDePresupuestos,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     anio: int = Query(ge=2000, le=2100),
     mes: int = Query(ge=1, le=12),
     limite: int = Query(default=200, gt=0, le=500),
@@ -271,7 +274,7 @@ def presupuestos_del_periodo(
 def desvincular_cuenta(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> None:
     """Desvincula el buzón y borra sus tokens. La fila se conserva como historial."""
     servicio.desvincular(usuario_id, cuenta_id)

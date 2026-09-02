@@ -23,6 +23,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.business.errors import ReglaDeNegocioViolada
 from app.business.services.comercio_service import ComercioClasificado, MovimientoDetallado
+from app.business.services.resumen_service import entrada_preferida_del_periodo
 from app.presentation.dependencies import ServicioDeComercios, ServicioDeCuentasCorreo
 
 router = APIRouter(prefix="/api/cuentas-correo", tags=["reportes"])
@@ -41,7 +42,7 @@ def exportar_movimientos_csv(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> Response:
     """Trae los comprobantes de BAC reconocidos y los exporta a CSV, un renglón por movimiento.
@@ -69,7 +70,7 @@ def exportar_movimientos_excel(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> Response:
     """Lo mismo que el CSV, pero como una hoja de Excel de verdad -con
@@ -93,7 +94,7 @@ def exportar_resumen_pdf(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> Response:
     """Arma un reporte de una página: KPIs y desglose por comercio del mes más
@@ -102,13 +103,21 @@ def exportar_resumen_pdf(
     No recibe año/mes por parámetro a propósito -mismo criterio que
     `Resumen.tsx` en el frontend: toma el mes más reciente de lo que
     realmente hay, en vez de dejar pedir un período que puede no tener datos.
+
+    Si ese mes tuvo movimientos en más de una moneda -`resumen.por_mes` trae
+    una fila por moneda, nunca las mezcla-, se prefiere colones y el reporte
+    queda de esa moneda; no hay espacio en una página de una sola moneda para
+    mostrar las dos.
     """
     resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
     if not resumen.por_mes:
         raise ReglaDeNegocioViolada(
             "No hay comprobantes de BAC reconocidos todavía para armar un reporte."
         )
-    mes_actual = resumen.por_mes[0]
+    anio_mas_reciente = resumen.por_mes[0].anio
+    mes_mas_reciente = resumen.por_mes[0].mes
+    mes_actual = entrada_preferida_del_periodo(resumen.por_mes, anio_mas_reciente, mes_mas_reciente)
+    assert mes_actual is not None  # por_mes[0] es de ese mismo período, siempre hay al menos uno
     prefijo_mes = f"{mes_actual.anio}-{mes_actual.mes:02d}"
     comprobantes_del_mes = [
         c
@@ -134,6 +143,35 @@ def exportar_resumen_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="gastonomo-reporte.pdf"'},
     )
+
+
+def _truncar(valor: str, largo_maximo: int = 40) -> str:
+    """Corta un valor largo antes de meterlo en una celda del PDF de ancho fijo.
+
+    El nombre de un comercio viene tal cual del cuerpo de un correo real, sin
+    ningún largo garantizado. Estas celdas son texto plano -no un
+    `Paragraph`, que sí ajusta línea- así que un nombre inusualmente largo
+    desbordaría la columna en vez de arruinar el layout con un salto raro.
+    """
+    return valor if len(valor) <= largo_maximo else valor[: largo_maximo - 1] + "…"
+
+
+_CARACTERES_DE_FORMULA = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _celda_segura(valor: str) -> str:
+    """Neutraliza una posible inyección de fórmula (CSV/Excel).
+
+    Un valor que empieza con `=`, `+`, `-`, `@` o un tabulador/retorno de
+    carro se interpreta como fórmula al abrirlo en Excel o LibreOffice -y el
+    nombre de un comercio es texto que viene tal cual del cuerpo de un
+    correo, no un dato que esta aplicación controle. Anteponerle una comilla
+    simple es la mitigación estándar (OWASP: CSV Injection): fuerza texto
+    literal sin cambiar lo que el usuario termina viendo en la celda.
+    """
+    if valor and valor[0] in _CARACTERES_DE_FORMULA:
+        return "'" + valor
+    return valor
 
 
 _ENCABEZADOS = (
@@ -167,15 +205,15 @@ def _csv_de_movimientos(movimientos: list[MovimientoDetallado]) -> str:
         escritor.writerow(
             [
                 movimiento.fecha.isoformat(),
-                movimiento.comercio,
-                movimiento.categoria_nombre or "",
+                _celda_segura(movimiento.comercio),
+                _celda_segura(movimiento.categoria_nombre or ""),
                 str(movimiento.monto),
                 movimiento.moneda,
-                movimiento.marca_tarjeta or "",
+                _celda_segura(movimiento.marca_tarjeta or ""),
                 movimiento.ultimos_cuatro or "",
-                movimiento.ciudad or "",
-                movimiento.pais or "",
-                movimiento.banco,
+                _celda_segura(movimiento.ciudad or ""),
+                _celda_segura(movimiento.pais or ""),
+                _celda_segura(movimiento.banco),
                 movimiento.autorizacion or "",
                 movimiento.referencia or "",
             ]
@@ -213,15 +251,15 @@ def _excel_de_movimientos(movimientos: list[MovimientoDetallado]) -> bytes:
         hoja.append(
             [
                 movimiento.fecha,
-                movimiento.comercio,
-                movimiento.categoria_nombre or "",
+                _celda_segura(movimiento.comercio),
+                _celda_segura(movimiento.categoria_nombre or ""),
                 movimiento.monto,
                 movimiento.moneda,
-                movimiento.marca_tarjeta or "",
+                _celda_segura(movimiento.marca_tarjeta or ""),
                 movimiento.ultimos_cuatro or "",
-                movimiento.ciudad or "",
-                movimiento.pais or "",
-                movimiento.banco,
+                _celda_segura(movimiento.ciudad or ""),
+                _celda_segura(movimiento.pais or ""),
+                _celda_segura(movimiento.banco),
                 movimiento.autorizacion or "",
                 movimiento.referencia or "",
             ]
@@ -284,8 +322,8 @@ def _pdf_de_resumen(
     for comercio in comercios:
         filas.append(
             [
-                comercio.nombre,
-                comercio.categoria_nombre or "Sin clasificar",
+                _truncar(comercio.nombre),
+                _truncar(comercio.categoria_nombre or "Sin clasificar"),
                 str(comercio.cantidad_transacciones),
                 f"{comercio.moneda} {comercio.total:,.2f}",
             ]

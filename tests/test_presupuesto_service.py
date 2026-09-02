@@ -269,6 +269,33 @@ def test_calcular_estados_ignora_gasto_de_otra_categoria(
     assert estados[0].monto_consumido == Decimal("0")
 
 
+def test_calcular_estados_no_mezcla_monedas_de_la_misma_categoria(
+    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario
+) -> None:
+    """Regresión: una categoría con gasto en dos monedas no debe sumarlas.
+
+    Caso real que lo disparó: "Transporte" clasificado tanto para un peaje en
+    colones como para un viaje de Uber en dólares. El presupuesto es de
+    colones -sumar el monto en dólares directo habría dado un número sin
+    sentido (colones + dólares como si fueran la misma unidad).
+    """
+    transporte = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Transporte", color_hex="#2563EB")
+    )
+    servicio.crear_o_actualizar(usuario.id, transporte.id, 2026, 9, Moneda.CRC, Decimal("50000"))
+    comercios = [
+        _comercio("PEAJE RUTA 27", transporte.id, Decimal("380"), moneda="CRC"),
+        _comercio("UBER BV USD-USD COSTA", transporte.id, Decimal("6.00"), moneda="USD"),
+    ]
+
+    estados = servicio.calcular_estados(usuario.id, 2026, 9, comercios)
+
+    assert len(estados) == 1
+    assert estados[0].monto_consumido == Decimal("380"), (
+        "no debe incluir el gasto en USD: el presupuesto es de CRC"
+    )
+
+
 def test_calcular_estados_sin_presupuestos_del_periodo_devuelve_vacio(
     servicio: PresupuestoService, usuario: Usuario
 ) -> None:

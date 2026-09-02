@@ -72,6 +72,26 @@ def agrupar_por_mes(comprobantes: list[ComprobanteParseado]) -> list[ResumenMens
     return resumen
 
 
+def entrada_preferida_del_periodo(
+    por_mes: list[ResumenMensual], anio: int, mes: int, moneda_preferida: str = "CRC"
+) -> ResumenMensual | None:
+    """De las entradas de un período -puede haber una por moneda-, la que hay que mostrar.
+
+    `agrupar_por_mes` nunca mezcla monedas: un mes con gasto en colones y en
+    dólares produce dos filas para ese mismo (año, mes), no una. Cualquier
+    vista que solo pueda mostrar un total a la vez (una tarjeta de KPI, un
+    reporte de una página) tiene que elegir una de esas filas -y "la primera
+    que aparezca" no sirve, porque el orden es alfabético por moneda, no por
+    relevancia. Se prefiere colones, la moneda del resto de la aplicación
+    (los presupuestos, por ejemplo, solo se crean en CRC), y se cae a lo que
+    haya si ese período no tuvo ningún movimiento en la preferida.
+    """
+    del_periodo = [e for e in por_mes if e.anio == anio and e.mes == mes]
+    if not del_periodo:
+        return None
+    return next((e for e in del_periodo if e.moneda == moneda_preferida), del_periodo[0])
+
+
 def filtrar_del_periodo(
     comprobantes: list[ComprobanteParseado], anio: int, mes: int
 ) -> list[ComprobanteParseado]:

@@ -137,12 +137,19 @@ class PresupuestoService:
         if not presupuestos:
             return []
 
-        consumido_por_categoria: dict[int, Decimal] = {}
+        # Clave (categoria_id, moneda), no solo categoria_id: una misma
+        # categoría puede tener comercios clasificados en más de una moneda
+        # (p. ej. "Transporte" con un peaje en colones y un Uber en dólares).
+        # Sumarlos juntos violaría la regla de nunca mezclar monedas -un
+        # presupuesto es de una moneda concreta (`Presupuesto.moneda`), así
+        # que solo cuenta el gasto que esté en esa misma moneda.
+        consumido_por_categoria: dict[tuple[int, str], Decimal] = {}
         for comercio in comercios_clasificados:
             if comercio.categoria_id is None:
                 continue
-            consumido_por_categoria[comercio.categoria_id] = (
-                consumido_por_categoria.get(comercio.categoria_id, Decimal("0")) + comercio.total
+            clave = (comercio.categoria_id, comercio.moneda)
+            consumido_por_categoria[clave] = (
+                consumido_por_categoria.get(clave, Decimal("0")) + comercio.total
             )
 
         estados = []
@@ -150,7 +157,9 @@ class PresupuestoService:
             categoria = self.categorias.obtener_por_id(presupuesto.categoria_id)
             if categoria is None:
                 continue
-            consumido = consumido_por_categoria.get(presupuesto.categoria_id, Decimal("0"))
+            consumido = consumido_por_categoria.get(
+                (presupuesto.categoria_id, presupuesto.moneda.value), Decimal("0")
+            )
             porcentaje, estado = self.calcular_estado(
                 consumido, presupuesto.monto_limite, presupuesto.umbral_alerta
             )

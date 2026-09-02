@@ -34,11 +34,20 @@ def cifrar(valor: str) -> str:
     return _fernet().encrypt(valor.encode()).decode()
 
 
-def descifrar(valor: str) -> str:
-    """Descifra un valor guardado. Lanza `TokenIlegible` si la clave no calza."""
+def descifrar(valor: str, ttl_segundos: int | None = None) -> str:
+    """Descifra un valor guardado. Lanza `TokenIlegible` si la clave no calza o venció.
+
+    `ttl_segundos` es opcional a propósito: los tokens de acceso guardados no
+    tienen por qué caducar por sí solos -su vigencia la controla Microsoft o
+    Google, no cuánto tiempo lleven cifrados en la base. El parámetro sí lo
+    usa el `state` del handshake de OAuth2, que por diseño debe ser de corta
+    vida (ver `cuentas_correo.py`): sin un `ttl`, Fernet no impone ningún
+    límite de tiempo por sí solo, y un `state` interceptado seguiría siendo
+    válido indefinidamente mientras la clave de cifrado no cambie.
+    """
     try:
-        return _fernet().decrypt(valor.encode()).decode()
+        return _fernet().decrypt(valor.encode(), ttl=ttl_segundos).decode()
     except InvalidToken as error:
         raise TokenIlegible(
-            "El token no se pudo descifrar con la clave de cifrado actual."
+            "El token no se pudo descifrar con la clave de cifrado actual, o venció."
         ) from error

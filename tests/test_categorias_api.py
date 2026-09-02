@@ -49,6 +49,18 @@ def test_usuario_inexistente_se_traduce_a_404(cliente: TestClient) -> None:
     assert respuesta.status_code == 404
 
 
+def test_usuario_id_mas_alla_de_lo_que_soporta_la_columna_da_422(cliente: TestClient) -> None:
+    """Regresión: un id absurdamente grande pasa la validación de FastAPI (es un
+    int válido) y solo revienta al convertirlo al INTEGER real de la columna.
+    Sin un manejador para sqlalchemy.exc.DataError, esto se colaba como un
+    500 crudo en vez de un 422 con mensaje -no es un caso solo de PostgreSQL,
+    también se ve sobre SQLite (motor de estas pruebas).
+    """
+    respuesta = cliente.get("/api/categorias", params={"usuario_id": 99999999999999999999999999})
+
+    assert respuesta.status_code == 422
+
+
 def test_listar_categorias_de_un_usuario(cliente: TestClient, usuario: Usuario) -> None:
     cliente.post(
         "/api/categorias",

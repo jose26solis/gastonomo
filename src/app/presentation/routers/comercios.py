@@ -14,6 +14,12 @@ router = APIRouter(prefix="/api/comercios", tags=["comercios"])
     summary="Asignar o corregir la categoría sugerida de un comercio",
 )
 def asignar_categoria(
+    # Sin cota superior a propósito -ver el comentario de _ID_MAXIMO en
+    # schemas.py: un id de ruta absurdamente grande lo atrapa igual el
+    # manejador de sqlalchemy.exc.DataError en main.py. Ponerle un `Path(...)`
+    # acá obligaría a reordenar los parámetros (uno con default no puede ir
+    # antes que uno sin default), y esa protección ya la da el manejador
+    # global sin duplicar la cota en cada endpoint con un id en la ruta.
     comercio_id: int,
     peticion: AsignarCategoriaComercioRequest,
     servicio: ServicioDeComercios,

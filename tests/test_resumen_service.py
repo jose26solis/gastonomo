@@ -4,7 +4,12 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.business.parsers.comprobante_bac import ComprobanteParseado
-from app.business.services.resumen_service import agrupar_por_mes, filtrar_del_periodo
+from app.business.services.resumen_service import (
+    ResumenMensual,
+    agrupar_por_mes,
+    entrada_preferida_del_periodo,
+    filtrar_del_periodo,
+)
 
 
 def _comprobante(
@@ -142,6 +147,54 @@ def test_filtrar_del_periodo_deja_solo_el_mes_pedido() -> None:
     assert [c.monto for c in del_agosto] == [Decimal("7870.00")]
     assert [c.monto for c in del_setiembre] == [Decimal("1000.00")]
     assert de_un_mes_sin_gasto == []
+
+
+def test_entrada_preferida_del_periodo_prefiere_crc_sobre_otras_monedas() -> None:
+    """Regresión: por_mes ordena por (año, mes, moneda) -alfabético, USD antes que CRC.
+
+    Una vista que solo puede mostrar una moneda a la vez (una tarjeta de KPI,
+    un reporte de una página) no puede elegir "la primera fila" a ciegas.
+    """
+    por_mes = [
+        ResumenMensual(
+            anio=2026, mes=9, moneda="USD", total=Decimal("6.00"), cantidad_transacciones=2
+        ),
+        ResumenMensual(
+            anio=2026, mes=9, moneda="CRC", total=Decimal("7600.00"), cantidad_transacciones=1
+        ),
+        ResumenMensual(
+            anio=2026, mes=8, moneda="CRC", total=Decimal("50000.00"), cantidad_transacciones=10
+        ),
+    ]
+
+    preferida = entrada_preferida_del_periodo(por_mes, 2026, 9)
+
+    assert preferida is not None
+    assert preferida.moneda == "CRC"
+    assert preferida.total == Decimal("7600.00")
+
+
+def test_entrada_preferida_del_periodo_cae_a_lo_que_haya_sin_crc() -> None:
+    por_mes = [
+        ResumenMensual(
+            anio=2026, mes=9, moneda="USD", total=Decimal("6.00"), cantidad_transacciones=2
+        )
+    ]
+
+    preferida = entrada_preferida_del_periodo(por_mes, 2026, 9)
+
+    assert preferida is not None
+    assert preferida.moneda == "USD"
+
+
+def test_entrada_preferida_del_periodo_sin_datos_del_periodo_da_none() -> None:
+    por_mes = [
+        ResumenMensual(
+            anio=2026, mes=8, moneda="CRC", total=Decimal("1.00"), cantidad_transacciones=1
+        )
+    ]
+
+    assert entrada_preferida_del_periodo(por_mes, 2026, 9) is None
 
 
 def test_filtrar_del_periodo_tambien_descarta_lo_no_sumable() -> None:

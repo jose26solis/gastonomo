@@ -3,6 +3,8 @@
 import csv
 import io
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -18,6 +20,7 @@ from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
 from app.presentation.dependencies import obtener_servicio_de_cuentas_correo
 from app.presentation.routers.cuentas_correo import _codificar_estado
+from app.presentation.routers.reportes import _pdf_de_resumen
 
 
 def test_exportar_csv_trae_solo_lo_de_bac_con_encabezado(
@@ -196,5 +199,187 @@ def test_exportar_pdf_sin_comprobantes_reconocidos_da_409(
 
         assert respuesta.status_code == 409
         assert "no hay comprobantes" in respuesta.json()["detalle"].lower()
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_cuentas_correo]
+
+
+def _cuerpo_bac(
+    comercio: str,
+    fecha: str,
+    monto: str,
+    moneda: str = "CRC",
+    ciudad_pais: str = "SAN JOSE, Costa Rica",
+) -> str:
+    """Arma el cuerpo de una notificación de BAC sintética, con el mismo formato real."""
+    return (
+        f"Notificaci?n de transacci?n {comercio}\n"
+        "From Notificaci?n BAC <NotificacionBAC@baccredomatic.cr>\n"
+        "Hola PERSONA DE PRUEBA\n"
+        "A continuaci?n le detallamos la transacci?n realizada:\n"
+        f"Comercio: {comercio}\n"
+        f"Ciudad y pa?s: {ciudad_pais}\n"
+        f"Fecha: {fecha}\n"
+        "AMEX: ***********4321\n"
+        "Autorizaci?n: 100200\n"
+        "Referencia: 99887766\n"
+        "Tipo de Transacci?n: COMPRA\n"
+        f"Monto: {moneda} {monto}\n"
+    )
+
+
+class _ProveedorConMensajesPersonalizados:
+    """Como `ProveedorDeCorreoFalso`, pero con los mensajes de BAC que la prueba elija."""
+
+    def __init__(self, cuerpos: dict[str, str]) -> None:
+        self.direccion = "titular@ejemplo.cr"
+        self._cuerpos = cuerpos
+
+    def url_de_autorizacion(self, estado: str) -> str:
+        return f"https://proveedor.falso/autorizar?state={estado}"
+
+    def intercambiar_codigo(self, codigo: str) -> TokensDeCorreo:
+        return TokensDeCorreo(
+            token_acceso="acceso",
+            token_refresco="refresco",
+            expira_en=datetime.now(UTC) + timedelta(hours=1),
+        )
+
+    def refrescar(self, token_refresco: str) -> TokensDeCorreo:
+        return self.intercambiar_codigo("")
+
+    def obtener_direccion(self, token_acceso: str) -> str:
+        return self.direccion
+
+    def listar_mensajes_recientes(
+        self, token_acceso: str, limite: int, remitente_contiene: str | None = None
+    ) -> list[MensajeResumido]:
+        return [
+            MensajeResumido(
+                identificador=id_,
+                remitente="NotificacionBAC@baccredomatic.cr",
+                asunto="",
+                recibido_en=None,
+            )
+            for id_ in self._cuerpos
+        ][:limite]
+
+    def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
+        return self._cuerpos[identificador]
+
+
+def _cliente_con_mensajes(cliente: TestClient, sesion: Session, cuerpos: dict[str, str]) -> None:
+    """Reemplaza el servicio de cuentas de correo por uno con estos mensajes exactos."""
+    proveedor = _ProveedorConMensajesPersonalizados(cuerpos)
+    app.dependency_overrides[obtener_servicio_de_cuentas_correo] = lambda: CuentaCorreoService(
+        CuentaCorreoRepository(sesion),
+        UsuarioRepository(sesion),
+        {ProveedorCorreo.OUTLOOK: proveedor},
+        ComprobanteRepository(sesion),
+    )
+
+
+def test_exportar_pdf_prefiere_colones_cuando_el_mes_tiene_dos_monedas(
+    cliente: TestClient, sesion: Session, usuario: Usuario
+) -> None:
+    """Regresión: el mismo bug que Resumen.tsx, pero del lado del PDF.
+
+    `resumen.por_mes` trae una fila por moneda; si el mes más reciente tuvo
+    gasto en colones y en dólares, el reporte no puede elegir la moneda por
+    orden alfabético (USD antes que CRC) -tiene que preferir colones.
+    """
+    _cliente_con_mensajes(
+        cliente,
+        sesion,
+        {
+            "1": _cuerpo_bac("DIP DEEP BURGER", "Set 1, 2026 , 17:14", "7,600.00", moneda="CRC"),
+            "2": _cuerpo_bac("UBER BV USD-USD COSTA", "Set 1, 2026 , 20:50", "6.00", moneda="USD"),
+        },
+    )
+    try:
+        estado = _codificar_estado(usuario.id)
+        vinculada = cliente.get(
+            "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+        ).json()
+
+        # El PDF que arma reportlab sale comprimido (Flate); en vez de
+        # parsear bytes binarios, se espía con qué moneda y total se llamó
+        # al armador -eso es exactamente lo que la selección del período
+        # tenía que decidir bien.
+        with patch(
+            "app.presentation.routers.reportes._pdf_de_resumen", wraps=_pdf_de_resumen
+        ) as espia:
+            respuesta = cliente.get(
+                f"/api/cuentas-correo/{vinculada['id']}/reportes/resumen.pdf",
+                params={"usuario_id": usuario.id},
+            )
+
+        assert respuesta.status_code == 200
+        argumentos = espia.call_args.kwargs
+        assert argumentos["moneda"] == "CRC"
+        assert argumentos["total_mes"] == Decimal("7600.00")
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_cuentas_correo]
+
+
+def test_exportar_csv_neutraliza_un_comercio_que_empieza_como_formula(
+    cliente: TestClient, sesion: Session, usuario: Usuario
+) -> None:
+    """Regresión: CSV Injection (OWASP) -un comercio no es un dato que la app controle.
+
+    El nombre del comercio viene tal cual del cuerpo de un correo real; si
+    empezara con '=', Excel lo interpretaría como fórmula al abrir el CSV.
+    """
+    _cliente_con_mensajes(
+        cliente,
+        sesion,
+        {"1": _cuerpo_bac("=cmd|'/c calc'!A1", "Ago 30, 2026 , 13:27", "1,000.00")},
+    )
+    try:
+        estado = _codificar_estado(usuario.id)
+        vinculada = cliente.get(
+            "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+        ).json()
+
+        respuesta = cliente.get(
+            f"/api/cuentas-correo/{vinculada['id']}/reportes/movimientos.csv",
+            params={"usuario_id": usuario.id},
+        )
+
+        texto = respuesta.text.lstrip("﻿")
+        filas = list(csv.reader(io.StringIO(texto)))
+        comercio_exportado = filas[1][1]
+
+        assert comercio_exportado.startswith("'"), (
+            "debe quedar neutralizado con una comilla adelante"
+        )
+        assert comercio_exportado == "'=cmd|'/c calc'!A1"
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_cuentas_correo]
+
+
+def test_exportar_excel_neutraliza_un_comercio_que_empieza_como_formula(
+    cliente: TestClient, sesion: Session, usuario: Usuario
+) -> None:
+    _cliente_con_mensajes(
+        cliente,
+        sesion,
+        {"1": _cuerpo_bac("+1234567 SOSPECHOSO", "Ago 30, 2026 , 13:27", "1,000.00")},
+    )
+    try:
+        estado = _codificar_estado(usuario.id)
+        vinculada = cliente.get(
+            "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+        ).json()
+
+        respuesta = cliente.get(
+            f"/api/cuentas-correo/{vinculada['id']}/reportes/movimientos.xlsx",
+            params={"usuario_id": usuario.id},
+        )
+
+        libro = load_workbook(io.BytesIO(respuesta.content))
+        hoja = libro.active
+        comercio_exportado = hoja.cell(row=2, column=2).value
+
+        assert comercio_exportado == "'+1234567 SOSPECHOSO"
     finally:
         del app.dependency_overrides[obtener_servicio_de_cuentas_correo]

@@ -34,7 +34,7 @@ def crear_o_actualizar(
 )
 def listar(
     servicio: ServicioDePresupuestos,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
     anio: int = Query(ge=2000, le=2100),
     mes: int = Query(ge=1, le=12),
 ) -> list[PresupuestoResponse]:
@@ -46,6 +46,6 @@ def listar(
 def eliminar(
     presupuesto_id: int,
     servicio: ServicioDePresupuestos,
-    usuario_id: int = Query(gt=0),
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> None:
     servicio.eliminar(usuario_id, presupuesto_id)

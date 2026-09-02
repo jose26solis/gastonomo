@@ -11,6 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.data.models.enums import EstadoCuentaCorreo, EstadoPresupuesto, Moneda, ProveedorCorreo
 
+# Tope real de una columna INTEGER de PostgreSQL. Un id "válido" (positivo)
+# pero absurdamente grande pasa `gt=0` sin problema y solo revienta al
+# convertirlo al tipo real de la columna -sqlalchemy.exc.DataError bajo
+# PostgreSQL, un OverflowError crudo de Python bajo SQLite. Ponerle este
+# techo acá, y no solo confiar en el manejador de errores de main.py, da un
+# 422 con mensaje consistente sin importar qué motor esté detrás.
+_ID_MAXIMO = 2_147_483_647
+
 
 class SaludResponse(BaseModel):
     """Respuesta del endpoint de salud."""
@@ -27,12 +35,15 @@ class CrearCategoriaRequest(BaseModel):
     puede crear o no es una pregunta del negocio, y se responde en el servicio.
     """
 
-    usuario_id: int = Field(gt=0, description="Titular dueno de la categoria")
+    usuario_id: int = Field(gt=0, le=_ID_MAXIMO, description="Titular dueno de la categoria")
     nombre: str = Field(min_length=1, max_length=60, examples=["Alimentacion"])
     color_hex: str = Field(max_length=7, examples=["#2563EB"])
     descripcion: str | None = Field(default=None, max_length=255)
     categoria_padre_id: int | None = Field(
-        default=None, gt=0, description="Categoria que la totaliza, si es subcategoria"
+        default=None,
+        gt=0,
+        le=_ID_MAXIMO,
+        description="Categoria que la totaliza, si es subcategoria",
     )
 
 
@@ -171,8 +182,8 @@ class ComercioClasificadoResponse(BaseModel):
 class AsignarCategoriaComercioRequest(BaseModel):
     """Cuerpo de POST /api/comercios/{id}/categoria."""
 
-    usuario_id: int = Field(gt=0)
-    categoria_id: int = Field(gt=0)
+    usuario_id: int = Field(gt=0, le=_ID_MAXIMO)
+    categoria_id: int = Field(gt=0, le=_ID_MAXIMO)
 
 
 class CrearPresupuestoRequest(BaseModel):
@@ -182,12 +193,16 @@ class CrearPresupuestoRequest(BaseModel):
     segunda llamada corrige el límite de la que ya existía.
     """
 
-    usuario_id: int = Field(gt=0)
-    categoria_id: int = Field(gt=0)
+    usuario_id: int = Field(gt=0, le=_ID_MAXIMO)
+    categoria_id: int = Field(gt=0, le=_ID_MAXIMO)
     anio: int = Field(ge=2000, le=2100)
     mes: int = Field(ge=1, le=12)
     moneda: Moneda
-    monto_limite: Decimal = Field(gt=0)
+    # < 10**12: lo que de verdad soporta la columna Numeric(14,2). Sin este
+    # tope, un valor con más dígitos pasa la validación y revienta en el
+    # INSERT con un psycopg.errors.NumericValueOutOfRange sin capturar -un
+    # 500 crudo en vez de un 422 con mensaje.
+    monto_limite: Decimal = Field(gt=0, lt=Decimal(10**12))
     umbral_alerta: int = Field(default=80, ge=1, le=100)
 
 

@@ -41,7 +41,9 @@ def crear_categoria(
 )
 def listar_categorias(
     servicio: ServicioDeCategorias,
-    usuario_id: int = Query(gt=0, description="Titular cuyas categorias se listan"),
+    usuario_id: int = Query(
+        gt=0, le=2_147_483_647, description="Titular cuyas categorias se listan"
+    ),
 ) -> list[CategoriaResponse]:
     """Lista las categorias activas del titular indicado."""
     categorias = servicio.listar_activas(usuario_id)

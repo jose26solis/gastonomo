@@ -59,6 +59,31 @@ def test_crear_presupuesto_con_limite_invalido_da_422(
     assert respuesta.status_code == 422
 
 
+def test_crear_presupuesto_con_limite_mas_alla_de_lo_que_soporta_la_columna_da_422(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    """Regresión: sin este tope, el valor pasaba la validación y reventaba en el
+    INSERT con un psycopg.errors.NumericValueOutOfRange -un 500 crudo sin
+    capturar, no un 422 con mensaje. La columna es Numeric(14,2): el límite
+    real es un valor absoluto menor que 10**12.
+    """
+    categoria_id = _crear_categoria(cliente_con_correo_falso, usuario.id, "Alimentación")
+
+    respuesta = cliente_con_correo_falso.post(
+        "/api/presupuestos",
+        json={
+            "usuario_id": usuario.id,
+            "categoria_id": categoria_id,
+            "anio": 2026,
+            "mes": 8,
+            "moneda": "CRC",
+            "monto_limite": "999999999999999",
+        },
+    )
+
+    assert respuesta.status_code == 422
+
+
 def test_eliminar_presupuesto(cliente_con_correo_falso: TestClient, usuario: Usuario) -> None:
     categoria_id = _crear_categoria(cliente_con_correo_falso, usuario.id, "Alimentación")
     creacion = cliente_con_correo_falso.post(
