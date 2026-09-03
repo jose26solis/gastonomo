@@ -171,6 +171,7 @@ def _response_desde_con_fuente(item: ComprobanteConFuente) -> ComprobanteConFuen
         monto_original=item.monto_original,
         moneda_original=item.moneda_original,
         tipo_cambio_fecha=item.tipo_cambio_fecha,
+        compra_id=item.compra_id,
     )
 
 

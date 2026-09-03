@@ -257,6 +257,10 @@ class ComprobanteConFuenteResponse(ComprobanteParseadoResponse):
     # estos dos dicen qué cobró el banco de verdad.
     monto_original: Decimal | None = None
     moneda_original: str | None = None
+    # La Compra real que se concilió a partir de este movimiento, si la hubo
+    # -con esto el frontend puede pedir GET /api/compras/{id}/bitacora. `None`
+    # si la confianza del parseo no alcanzó para conciliar (ver ConciliacionService).
+    compra_id: int | None = None
     # De qué día es la tasa con la que se convirtió este movimiento. Puede no
     # ser la de hoy -si se guardó al sincronizarlo- ni la de la compra -si se
     # sincronizó tarde. Va explícito para que la pantalla no tenga que suponer.

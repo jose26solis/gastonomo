@@ -73,6 +73,11 @@ class ComprobanteConFuente:
     # la compra que el de hoy.
     tipo_cambio_venta: Decimal | None = None
     tipo_cambio_fecha: date | None = None
+    # La Compra real que ConciliacionService creó a partir de este comprobante,
+    # si logró conciliar (confianza suficiente y sin error a mitad de camino).
+    # Es lo que le permite al frontend pedir GET /api/compras/{id}/bitacora
+    # -sin esto no habría cómo bajar del movimiento a su trazabilidad completa.
+    compra_id: int | None = None
     # Lo que decía el comprobante antes de convertirlo, cuando se pidió el
     # resumen en una sola moneda. Se conserva para poder mostrar "$6.00" y no
     # solo el equivalente: el monto convertido es una referencia, el que el
@@ -452,6 +457,7 @@ class CuentaCorreoService:
                         direccion=cuenta.direccion,
                         tipo_cambio_venta=fila.tipo_cambio_venta,
                         tipo_cambio_fecha=fila.tipo_cambio_fecha,
+                        compra_id=fila.compra_id,
                     )
                 )
         return con_fuente

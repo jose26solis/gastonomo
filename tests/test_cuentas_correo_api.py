@@ -238,6 +238,9 @@ def test_el_resumen_combinado_trae_las_dos_cuentas_marcadas_con_su_origen(
         "titular@gmail.com",
     }
     assert cuerpo["por_mes"][0]["cantidad_transacciones"] == 2
+    # Cada comprobante confiable concilió una Compra real -sin esto el
+    # frontend no tendría con qué pedir GET /api/compras/{id}/bitacora.
+    assert all(c["compra_id"] is not None for c in cuerpo["comprobantes"])
 
 
 def test_el_resumen_combinado_sin_cuentas_vinculadas_no_falla(
