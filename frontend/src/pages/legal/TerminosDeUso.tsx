@@ -73,8 +73,8 @@ export function TerminosDeUso() {
 
       <Seccion titulo="Contacto">
         <p>
-          <a href="mailto:soporte@gastonomo.app" style={{ color: "var(--color-accent-200)" }}>
-            soporte@gastonomo.app
+          <a href="mailto:info@altiorasys.com" style={{ color: "var(--color-accent-200)" }}>
+            info@altiorasys.com
           </a>
         </p>
       </Seccion>

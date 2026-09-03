@@ -81,8 +81,8 @@ export function PoliticaDePrivacidad() {
         <p>
           Podés pedir ver, corregir o eliminar tus datos, o eliminar tu cuenta por completo,
           escribiéndonos a{" "}
-          <a href="mailto:soporte@gastonomo.app" style={{ color: "var(--color-accent-200)" }}>
-            soporte@gastonomo.app
+          <a href="mailto:info@altiorasys.com" style={{ color: "var(--color-accent-200)" }}>
+            info@altiorasys.com
           </a>
           . Hoy ese pedido lo procesamos manualmente -todavía no hay un botón de autoservicio
           dentro de la app para borrar la cuenta.
@@ -110,8 +110,8 @@ export function PoliticaDePrivacidad() {
 
       <Seccion titulo="Contacto">
         <p>
-          <a href="mailto:soporte@gastonomo.app" style={{ color: "var(--color-accent-200)" }}>
-            soporte@gastonomo.app
+          <a href="mailto:info@altiorasys.com" style={{ color: "var(--color-accent-200)" }}>
+            info@altiorasys.com
           </a>
         </p>
       </Seccion>
