@@ -9,7 +9,13 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.data.models.enums import EstadoCuentaCorreo, EstadoPresupuesto, Moneda, ProveedorCorreo
+from app.data.models.enums import (
+    EstadoCuentaCorreo,
+    EstadoPresupuesto,
+    Moneda,
+    ProveedorCorreo,
+    TipoMetodoPago,
+)
 
 # Tope real de una columna INTEGER de PostgreSQL. Un id "válido" (positivo)
 # pero absurdamente grande pasa `gt=0` sin problema y solo revienta al
@@ -395,6 +401,48 @@ class PresupuestoResponse(BaseModel):
     moneda: Moneda
     monto_limite: Decimal
     umbral_alerta: int
+
+
+class CrearMetodoPagoRequest(BaseModel):
+    """Cuerpo de POST /api/metodos-pago."""
+
+    usuario_id: int = Field(gt=0, le=_ID_MAXIMO)
+    alias: str = Field(min_length=1, max_length=60, examples=["Visa BAC"])
+    tipo: TipoMetodoPago
+    moneda: Moneda = Moneda.CRC
+    ultimos_cuatro: str | None = Field(default=None, min_length=4, max_length=4)
+    entidad: str | None = Field(default=None, max_length=80)
+    dia_corte: int | None = Field(default=None, ge=1, le=31)
+
+
+class MetodoPagoResponse(BaseModel):
+    """Un método de pago tal como quedó guardado."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuario_id: int
+    alias: str
+    tipo: TipoMetodoPago
+    moneda: Moneda
+    ultimos_cuatro: str | None
+    entidad: str | None
+    dia_corte: int | None
+    activo: bool
+
+
+class EventoBitacoraResponse(BaseModel):
+    """Un evento de la trazabilidad de una compra, tal como vive en Mongo.
+
+    No hereda `from_attributes`: el documento de Mongo llega como `dict`
+    plano, no como un objeto con atributos.
+    """
+
+    secuencia: int
+    tipo: str
+    ocurrido_en: datetime
+    actor: dict
+    datos: dict
 
 
 class EstadoDePresupuestoResponse(BaseModel):

@@ -29,6 +29,13 @@ class Categoria(Base):
     categoria_padre_id: Mapped[int | None] = mapped_column(
         ForeignKey("categoria.id"), nullable=True
     )
+    # De qué categoría de la taxonomía global (`CategoriaEstandar`) nació
+    # esta -NULL cuando el titular la creó él mismo, sin partir de la
+    # semilla. Es lo que permite que la sugerencia de un comercio compartido
+    # aterrice en la categoría propia de cada titular.
+    categoria_estandar_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categoria_estandar.id"), nullable=True
+    )
     nombre: Mapped[str] = mapped_column(String(60), nullable=False)
     descripcion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     color_hex: Mapped[str] = mapped_column(String(7), nullable=False)

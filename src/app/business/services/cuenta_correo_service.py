@@ -17,6 +17,7 @@ from app.business.parsers.transferencia_sinpe import (
     parsear_transferencia_sinpe,
 )
 from app.business.seguridad.cifrado import cifrar, descifrar
+from app.business.services.conciliacion_service import ConciliacionService
 from app.business.services.correo.proveedor import MensajeResumido, ProveedorDeCorreo
 from app.business.services.resumen_service import ResumenFinanciero, agrupar_por_mes
 from app.business.services.tipo_cambio_service import (
@@ -284,6 +285,7 @@ class CuentaCorreoService:
         comprobante_repository: ComprobanteRepository,
         transferencia_sinpe_repository: TransferenciaSinpeRepository,
         tipo_cambio_service: TipoCambioService | None = None,
+        conciliacion_service: ConciliacionService | None = None,
     ) -> None:
         self.cuentas = cuenta_correo_repository
         self.usuarios = usuario_repository
@@ -294,6 +296,10 @@ class CuentaCorreoService:
         # que los comprobantes quedan sin tipo de cambio guardado. Leer correo
         # no puede depender de que un servicio de moneda esté disponible.
         self.tipo_cambio = tipo_cambio_service
+        # Opcional por la misma razón: sin él, un comprobante nuevo se sigue
+        # cacheando en `Comprobante` como siempre -solo que no nace ninguna
+        # `Compra` real de negocio a partir de él. Ver ConciliacionService.
+        self.conciliacion = conciliacion_service
 
     def url_de_autorizacion(self, usuario_id: int, proveedor: ProveedorCorreo, estado: str) -> str:
         """Arma la URL a la que se manda al titular para que autorice el acceso."""
@@ -629,7 +635,10 @@ class CuentaCorreoService:
 
         Un mensaje puntual que no se puede leer (borrado entretanto, error
         transitorio del proveedor) se descarta y no tira abajo el resto de
-        la sincronización.
+        la sincronización. Lo mismo si concilia mal: un comprobante puntual
+        que falla al conciliar (ver `ConciliacionService`) se revierte solo
+        él -no los que ya se guardaron antes en este mismo lote- y se sigue
+        con el resto.
         """
         token_acceso = self._token_acceso_vigente(cuenta)
         proveedor = self._proveedor(cuenta.proveedor)
@@ -653,9 +662,15 @@ class CuentaCorreoService:
             except ErrorDeProveedorExterno:
                 continue
             parseado = parsear_comprobante_bac(cuerpo)
-            self.comprobantes.agregar(
+            fila = self.comprobantes.agregar(
                 _fila_desde_parseado(cuenta.id, mensaje.identificador, parseado, tipo_de_cambio)
             )
+            if self.conciliacion is not None:
+                try:
+                    self.conciliacion.conciliar(cuenta.usuario_id, fila, parseado)
+                except Exception:
+                    self.cuentas.sesion.rollback()
+                    continue
             agregados += 1
 
         cuenta.ultima_sincronizacion = datetime.now(UTC)

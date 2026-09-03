@@ -1,9 +1,4 @@
-"""Enumeraciones del dominio.
-
-Solo estan las que usan las entidades implementadas en el Laboratorio 1. Las
-demas (estado de compra, tipo de metodo de pago, estado de comprobante) entran
-cuando entren sus entidades.
-"""
+"""Enumeraciones del dominio."""
 
 from enum import StrEnum
 
@@ -42,3 +37,43 @@ class EstadoPresupuesto(StrEnum):
     EN_RANGO = "EN_RANGO"
     CERCA_DEL_LIMITE = "CERCA_DEL_LIMITE"
     EXCEDIDO = "EXCEDIDO"
+
+
+class EstadoCompra(StrEnum):
+    """Ciclo de vida de una compra. `CONCILIADA` no se edita, solo se anula."""
+
+    BORRADOR = "BORRADOR"
+    REGISTRADA = "REGISTRADA"
+    CONCILIADA = "CONCILIADA"
+    ANULADA = "ANULADA"
+
+
+class OrigenCompra(StrEnum):
+    """De dónde nació la compra."""
+
+    MANUAL = "MANUAL"
+    INGESTA_CORREO = "INGESTA_CORREO"
+    FACTURA_XML = "FACTURA_XML"
+
+
+class TipoMetodoPago(StrEnum):
+    """Solo DEBITO/CREDITO llevan últimos cuatro dígitos -ver MetodoPago."""
+
+    EFECTIVO = "EFECTIVO"
+    DEBITO = "DEBITO"
+    CREDITO = "CREDITO"
+    SINPE_MOVIL = "SINPE_MOVIL"
+    TRANSFERENCIA = "TRANSFERENCIA"
+
+
+class CampoRegla(StrEnum):
+    """Sobre qué texto se evalúa el patrón de una ReglaCategorizacion.
+
+    Cerrado a propósito: si fuera texto libre, una regla podría apuntar a un
+    campo inexistente y el motor de categorización fallaría en tiempo de
+    ejecución en vez de al guardarla.
+    """
+
+    COMERCIO_NORMALIZADO = "COMERCIO_NORMALIZADO"
+    DESCRIPCION_COMPRA = "DESCRIPCION_COMPRA"
+    DESCRIPCION_LINEA = "DESCRIPCION_LINEA"

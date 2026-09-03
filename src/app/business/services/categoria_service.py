@@ -5,11 +5,32 @@ from dataclasses import dataclass
 
 from app.business.errors import DatosInvalidos, RecursoNoEncontrado, ReglaDeNegocioViolada
 from app.data.models.categoria import Categoria
+from app.data.repositories.categoria_estandar_repository import CategoriaEstandarRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 
 LARGO_MAXIMO_NOMBRE = 60
 PATRON_COLOR_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+# Jerarquía fija con la que se siembra la cuenta de todo titular nuevo, tomada
+# tal cual del seed de Flyway (db/postgres/seeds/afterMigrate__datos_de_ejemplo.sql):
+# 3 categorías padre con sus hijas, el resto como hojas sueltas. El código -no
+# el nombre- es la llave estable de `categoria_estandar`.
+_JERARQUIA_ESTANDAR: dict[str, list[str]] = {
+    "ALIMENTACION": ["SUPERMERCADO", "RESTAURANTES"],
+    "TRANSPORTE": ["COMBUSTIBLE"],
+    "SALUD": ["FARMACIA"],
+}
+_HOJAS_SUELTAS = (
+    "HOGAR",
+    "SERVICIOS_PUBLICOS",
+    "SUSCRIPCIONES",
+    "ENTRETENIMIENTO",
+    "EDUCACION",
+    "ROPA",
+    "MASCOTAS",
+    "OTROS",
+)
 
 
 @dataclass(frozen=True)
@@ -35,9 +56,11 @@ class CategoriaService:
         self,
         categoria_repository: CategoriaRepository,
         usuario_repository: UsuarioRepository,
+        categoria_estandar_repository: CategoriaEstandarRepository,
     ) -> None:
         self.categorias = categoria_repository
         self.usuarios = usuario_repository
+        self.estandar = categoria_estandar_repository
 
     def crear(self, comando: CrearCategoriaComando) -> Categoria:
         """Crea una categoria de un usuario.
@@ -98,6 +121,56 @@ class CategoriaService:
         # sabe que la operacion completa -incluido el cambio en la padre- cuadro.
         self.categorias.sesion.commit()
         return categoria
+
+    def sembrar_estandar(self, usuario_id: int) -> list[Categoria]:
+        """Crea la jerarquía inicial de un titular nuevo a partir de `CategoriaEstandar`.
+
+        "Para que nadie arranque con una lista vacía" -la propuesta de
+        dominio original. Se llama una sola vez, desde `AuthService.registrar`,
+        justo después de crear el `Usuario`. Si las 15 filas de
+        `categoria_estandar` todavía no existen en esta base -una base nueva
+        antes de que arranque `crear_tablas()`/la siembra a nivel de sistema-
+        simplemente no crea nada: no es un error, es una cuenta que arranca
+        sin catálogo semilla y puede crear sus categorías a mano igual que
+        antes de que existiera esta función.
+        """
+        por_codigo = {ce.codigo: ce for ce in self.estandar.listar_ordenadas()}
+        if not por_codigo:
+            return []
+
+        creadas: dict[str, Categoria] = {}
+
+        def crear(codigo: str, padre: Categoria | None) -> Categoria | None:
+            estandar = por_codigo.get(codigo)
+            if estandar is None:
+                return None
+            categoria = Categoria(
+                usuario_id=usuario_id,
+                categoria_padre_id=padre.id if padre else None,
+                categoria_estandar_id=estandar.id,
+                nombre=estandar.nombre,
+                descripcion=estandar.descripcion,
+                color_hex=estandar.color_hex,
+                es_hoja=True,
+                activa=True,
+            )
+            self.categorias.agregar(categoria)  # flush: ya tiene id para ser padre de una hija
+            creadas[codigo] = categoria
+            return categoria
+
+        for codigo_padre, codigos_hijos in _JERARQUIA_ESTANDAR.items():
+            padre = crear(codigo_padre, None)
+            if padre is None:
+                continue
+            for codigo_hijo in codigos_hijos:
+                if crear(codigo_hijo, padre) is not None:
+                    padre.es_hoja = False
+
+        for codigo in _HOJAS_SUELTAS:
+            crear(codigo, None)
+
+        self.categorias.sesion.commit()
+        return list(creadas.values())
 
     def listar_activas(self, usuario_id: int) -> list[Categoria]:
         """Lista las categorias activas de un usuario."""

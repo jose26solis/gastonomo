@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.business.errors import DatosInvalidos, RecursoNoEncontrado, ReglaDeNegocioViolada
 from app.business.services.categoria_service import CategoriaService, CrearCategoriaComando
-from app.business.services.comercio_service import ComercioClasificado
 from app.business.services.presupuesto_service import PresupuestoService
 from app.data.models.enums import EstadoPresupuesto, Moneda
 from app.data.models.usuario import Usuario
+from app.data.repositories.categoria_estandar_repository import CategoriaEstandarRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.presupuesto_repository import PresupuestoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
@@ -25,18 +25,8 @@ def servicio(sesion: Session) -> PresupuestoService:
 
 @pytest.fixture
 def categorias(sesion: Session) -> CategoriaService:
-    return CategoriaService(CategoriaRepository(sesion), UsuarioRepository(sesion))
-
-
-def _comercio(nombre: str, categoria_id: int | None, total: Decimal, moneda: str = "CRC"):
-    return ComercioClasificado(
-        comercio_id=1,
-        nombre=nombre,
-        categoria_id=categoria_id,
-        categoria_nombre=None,
-        cantidad_transacciones=1,
-        total=total,
-        moneda=moneda,
+    return CategoriaService(
+        CategoriaRepository(sesion), UsuarioRepository(sesion), CategoriaEstandarRepository(sesion)
     )
 
 
@@ -216,104 +206,67 @@ def test_eliminar_presupuesto_de_otro_titular_falla(
         servicio.eliminar(otro.id, presupuesto.id)
 
 
-# ---- calcular_estados: combina presupuesto + gasto clasificado ----
+# ---- calcular_estados: lee el consumo ya acumulado ----
+#
+# `monto_consumido` ya no se recalcula acá desde comercios clasificados: lo
+# acumula `ConciliacionService` dentro de la transacción que registra cada
+# compra real (ver test_conciliacion_service.py). Estas pruebas verifican
+# que `calcular_estados` lee ese valor y calcula bien el porcentaje/estado
+# -mutan `monto_consumido` directo, como si ya lo hubiera acumulado una
+# conciliación real.
 
 
-def test_calcular_estados_suma_el_gasto_real_de_la_categoria(
-    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario
+def test_calcular_estados_lee_el_consumo_ya_acumulado(
+    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario, sesion: Session
 ) -> None:
     categoria = categorias.crear(
         CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#2563EB")
     )
-    servicio.crear_o_actualizar(usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("100000"))
-    comercios = [
-        _comercio("WALMART", categoria.id, Decimal("30000")),
-        _comercio("AUTOMERCADO", categoria.id, Decimal("20000")),
-    ]
+    presupuesto = servicio.crear_o_actualizar(
+        usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("100000")
+    )
+    presupuesto.monto_consumido = Decimal("50000")
+    sesion.commit()
 
-    estados = servicio.calcular_estados(usuario.id, 2026, 8, comercios)
+    estados = servicio.calcular_estados(usuario.id, 2026, 8)
 
     assert len(estados) == 1
     assert estados[0].monto_consumido == Decimal("50000")
     assert estados[0].estado == EstadoPresupuesto.EN_RANGO
 
 
-def test_calcular_estados_ignora_comercios_sin_categoria_asignada(
+def test_calcular_estados_sin_acumular_nada_da_cero(
     servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario
 ) -> None:
     categoria = categorias.crear(
         CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#2563EB")
     )
     servicio.crear_o_actualizar(usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("100000"))
-    comercios = [_comercio("PALI SANTA ANA", categoria_id=None, total=Decimal("30000"))]
 
-    estados = servicio.calcular_estados(usuario.id, 2026, 8, comercios)
-
-    assert estados[0].monto_consumido == Decimal("0")
-
-
-def test_calcular_estados_ignora_gasto_de_otra_categoria(
-    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario
-) -> None:
-    alimentacion = categorias.crear(
-        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#2563EB")
-    )
-    gasolina = categorias.crear(
-        CrearCategoriaComando(usuario_id=usuario.id, nombre="Gasolina", color_hex="#16A34A")
-    )
-    servicio.crear_o_actualizar(usuario.id, alimentacion.id, 2026, 8, Moneda.CRC, Decimal("100000"))
-    comercios = [_comercio("UNOPETROL", gasolina.id, Decimal("50000"))]
-
-    estados = servicio.calcular_estados(usuario.id, 2026, 8, comercios)
+    estados = servicio.calcular_estados(usuario.id, 2026, 8)
 
     assert estados[0].monto_consumido == Decimal("0")
-
-
-def test_calcular_estados_no_mezcla_monedas_de_la_misma_categoria(
-    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario
-) -> None:
-    """Regresión: una categoría con gasto en dos monedas no debe sumarlas.
-
-    Caso real que lo disparó: "Transporte" clasificado tanto para un peaje en
-    colones como para un viaje de Uber en dólares. El presupuesto es de
-    colones -sumar el monto en dólares directo habría dado un número sin
-    sentido (colones + dólares como si fueran la misma unidad).
-    """
-    transporte = categorias.crear(
-        CrearCategoriaComando(usuario_id=usuario.id, nombre="Transporte", color_hex="#2563EB")
-    )
-    servicio.crear_o_actualizar(usuario.id, transporte.id, 2026, 9, Moneda.CRC, Decimal("50000"))
-    comercios = [
-        _comercio("PEAJE RUTA 27", transporte.id, Decimal("380"), moneda="CRC"),
-        _comercio("UBER BV USD-USD COSTA", transporte.id, Decimal("6.00"), moneda="USD"),
-    ]
-
-    estados = servicio.calcular_estados(usuario.id, 2026, 9, comercios)
-
-    assert len(estados) == 1
-    assert estados[0].monto_consumido == Decimal("380"), (
-        "no debe incluir el gasto en USD: el presupuesto es de CRC"
-    )
 
 
 def test_calcular_estados_sin_presupuestos_del_periodo_devuelve_vacio(
     servicio: PresupuestoService, usuario: Usuario
 ) -> None:
-    assert servicio.calcular_estados(usuario.id, 2026, 8, []) == []
+    assert servicio.calcular_estados(usuario.id, 2026, 8) == []
 
 
-def test_calcular_estados_marca_excedido_con_gasto_real(
-    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario
+def test_calcular_estados_marca_excedido_con_el_consumo_acumulado(
+    servicio: PresupuestoService, categorias: CategoriaService, usuario: Usuario, sesion: Session
 ) -> None:
     categoria = categorias.crear(
         CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#2563EB")
     )
-    servicio.crear_o_actualizar(
+    presupuesto = servicio.crear_o_actualizar(
         usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("50000"), umbral_alerta=80
     )
-    comercios = [_comercio("WALMART", categoria.id, Decimal("60000"))]
+    presupuesto.monto_consumido = Decimal("60000")
+    sesion.commit()
 
-    estados = servicio.calcular_estados(usuario.id, 2026, 8, comercios)
+    estados = servicio.calcular_estados(usuario.id, 2026, 8)
 
     assert estados[0].estado == EstadoPresupuesto.EXCEDIDO
     assert estados[0].porcentaje_usado == 120.0

@@ -10,13 +10,14 @@ note en producción como "el usuario de demostración no puede entrar".
 from dataclasses import replace
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.business.seguridad.contrasenas import verificar_contrasena
 from app.config import database
 from app.data.models.base import Base
+from app.data.models.categoria_estandar import CategoriaEstandar
 from app.data.models.usuario import Usuario
 
 
@@ -65,3 +66,43 @@ def test_no_hace_nada_si_la_base_ya_tiene_algun_usuario(base_vacia) -> None:
     with base_vacia() as sesion:
         correos = sesion.scalars(select(Usuario.correo)).all()
         assert correos == ["existente@correo.cr"], "no debió agregar el usuario de demostración"
+
+
+def test_siembra_las_quince_categorias_estandar(base_vacia) -> None:
+    database.sembrar_categorias_estandar()
+
+    with base_vacia() as sesion:
+        codigos = set(sesion.scalars(select(CategoriaEstandar.codigo)))
+        assert len(codigos) == 15
+        assert "ALIMENTACION" in codigos
+        assert "OTROS" in codigos
+
+
+def test_sembrar_categorias_estandar_es_idempotente(base_vacia) -> None:
+    database.sembrar_categorias_estandar()
+    database.sembrar_categorias_estandar()
+
+    with base_vacia() as sesion:
+        assert sesion.scalar(select(func.count()).select_from(CategoriaEstandar)) == 15
+
+
+def test_sembrar_categorias_estandar_agrega_solo_lo_que_falta(base_vacia) -> None:
+    """Una base que ya tenía algunas -de una siembra anterior con menos filas,
+    o cargadas a mano- no las duplica ni las pisa."""
+    with base_vacia() as sesion:
+        sesion.add(
+            CategoriaEstandar(
+                codigo="ALIMENTACION", nombre="Nombre editado a mano", color_hex="#000000", orden=1
+            )
+        )
+        sesion.commit()
+
+    database.sembrar_categorias_estandar()
+
+    with base_vacia() as sesion:
+        total = sesion.scalar(select(func.count()).select_from(CategoriaEstandar))
+        assert total == 15
+        alimentacion = sesion.scalars(
+            select(CategoriaEstandar).where(CategoriaEstandar.codigo == "ALIMENTACION")
+        ).one()
+        assert alimentacion.nombre == "Nombre editado a mano", "no pisa lo que ya existía"

@@ -31,7 +31,7 @@ from app.business.services.cuenta_correo_service import (
     VincularCuentaComando,
     convertidos_a,
 )
-from app.business.services.resumen_service import agrupar_por_mes, filtrar_del_periodo
+from app.business.services.resumen_service import agrupar_por_mes
 from app.data.models.enums import Moneda, ProveedorCorreo
 from app.presentation.dependencies import (
     ServicioDeComercios,
@@ -310,7 +310,6 @@ def comercios_clasificados_de_usuario(
 )
 def presupuestos_del_periodo_de_usuario(
     servicio: ServicioDeCuentasCorreo,
-    servicio_comercios: ServicioDeComercios,
     servicio_presupuestos: ServicioDePresupuestos,
     _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
@@ -318,13 +317,15 @@ def presupuestos_del_periodo_de_usuario(
     mes: int = Query(ge=1, le=12),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> list[EstadoDePresupuestoResponse]:
-    """Igual que `/{cuenta_id}/presupuestos`, pero comparando el consumo real
-    de todas las cuentas activas del titular contra el límite de cada categoría.
+    """Igual que `/{cuenta_id}/presupuestos`, pero para todas las cuentas activas del titular.
+
+    Sincroniza antes de leer -mismo motivo que `/resumen-financiero`: un
+    comprobante nuevo puede traer una compra real que todavía no impactó
+    ningún presupuesto. El consumo en sí ya viene acumulado
+    (`ConciliacionService`), no se recalcula acá.
     """
-    resumen = servicio.resumen_financiero_de_usuario(usuario_id, limite)
-    comprobantes_del_periodo = filtrar_del_periodo(resumen.comprobantes, anio, mes)
-    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, comprobantes_del_periodo)
-    estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes, clasificados)
+    servicio.resumen_financiero_de_usuario(usuario_id, limite)
+    estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes)
     return [EstadoDePresupuestoResponse.model_validate(e) for e in estados]
 
 
@@ -447,7 +448,6 @@ def comercios_clasificados(
 def presupuestos_del_periodo(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
-    servicio_comercios: ServicioDeComercios,
     servicio_presupuestos: ServicioDePresupuestos,
     _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
@@ -455,17 +455,14 @@ def presupuestos_del_periodo(
     mes: int = Query(ge=1, le=12),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> list[EstadoDePresupuestoResponse]:
-    """Lee los comprobantes de BAC, los clasifica por comercio y compara el
-    consumo real de cada categoría contra su presupuesto del período.
+    """Sincroniza este buzón y compara el consumo real de cada categoría (ya
+    acumulado por `ConciliacionService`) contra su presupuesto del período.
 
-    Un presupuesto sin ningún comercio clasificado en su categoría sale con
-    `monto_consumido = 0`, no con un error: es simplemente que todavía no
-    hubo gasto reconocido ahí, o que lo que hubo no está clasificado.
+    Un presupuesto sin ninguna compra real conciliada en su categoría sale
+    con `monto_consumido = 0`, no con un error.
     """
-    resumen = servicio.resumen_financiero(usuario_id, cuenta_id, limite)
-    comprobantes_del_periodo = filtrar_del_periodo(resumen.comprobantes, anio, mes)
-    clasificados = servicio_comercios.clasificar_comprobantes(usuario_id, comprobantes_del_periodo)
-    estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes, clasificados)
+    servicio.resumen_financiero(usuario_id, cuenta_id, limite)
+    estados = servicio_presupuestos.calcular_estados(usuario_id, anio, mes)
     return [EstadoDePresupuestoResponse.model_validate(e) for e in estados]
 
 

@@ -13,26 +13,37 @@ from sqlalchemy.orm import Session
 
 from app.business.errors import AccesoDenegado, CredencialesInvalidas
 from app.business.services.auth_service import AuthService
+from app.business.services.bitacora_service import BitacoraComprasService
 from app.business.services.categoria_service import CategoriaService
 from app.business.services.comercio_service import ComercioService
+from app.business.services.compra_service import CompraService
+from app.business.services.conciliacion_service import ConciliacionService
 from app.business.services.correo.gmail import GmailProveedor
 from app.business.services.correo.outlook import OutlookProveedor
 from app.business.services.correo.proveedor import ProveedorDeCorreo
 from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.business.services.identidad_google import IdentidadGoogleProveedor
+from app.business.services.metodo_pago_service import MetodoPagoService
 from app.business.services.presupuesto_service import PresupuestoService
 from app.business.services.tipo_cambio_service import TipoCambioService
 from app.config.cliente_http import obtener_cliente_http
+from app.config.cliente_mongo import obtener_coleccion_bitacora
 from app.config.database import obtener_sesion
 from app.config.settings import obtener_configuracion
 from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.categoria_estandar_repository import CategoriaEstandarRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
 from app.data.repositories.comercio_repository import ComercioRepository
+from app.data.repositories.compra_repository import CompraRepository
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.linea_compra_repository import LineaCompraRepository
+from app.data.repositories.metodo_pago_repository import MetodoPagoRepository
 from app.data.repositories.presupuesto_repository import PresupuestoRepository
+from app.data.repositories.regla_categorizacion_repository import ReglaCategorizacionRepository
+from app.data.repositories.tipo_cambio_repository import TipoCambioRepository
 from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 
@@ -42,7 +53,9 @@ ClienteHttpDependencia = Annotated[httpx.Client, Depends(obtener_cliente_http)]
 
 def obtener_servicio_de_categorias(sesion: SesionDependencia) -> CategoriaService:
     """Arma el servicio de categorias con sus repositorios sobre la sesion actual."""
-    return CategoriaService(CategoriaRepository(sesion), UsuarioRepository(sesion))
+    return CategoriaService(
+        CategoriaRepository(sesion), UsuarioRepository(sesion), CategoriaEstandarRepository(sesion)
+    )
 
 
 ServicioDeCategorias = Annotated[CategoriaService, Depends(obtener_servicio_de_categorias)]
@@ -74,7 +87,8 @@ def obtener_servicio_de_cuentas_correo(
     Recibe también el servicio de tipo de cambio, pero no para convertir nada:
     lo usa para sellar cada comprobante nuevo con la tasa del día en que se
     sincroniza, y así poder convertirlo después sin depender de una consulta
-    histórica al Banco Central.
+    histórica al Banco Central. Y el servicio de conciliación, que corre justo
+    después de guardar cada comprobante nuevo -ver `ConciliacionService`.
     """
     return CuentaCorreoService(
         CuentaCorreoRepository(sesion),
@@ -83,6 +97,7 @@ def obtener_servicio_de_cuentas_correo(
         ComprobanteRepository(sesion),
         TransferenciaSinpeRepository(sesion),
         obtener_servicio_de_tipo_cambio(cliente),
+        obtener_servicio_de_conciliacion(sesion, cliente),
     )
 
 
@@ -113,6 +128,61 @@ def obtener_servicio_de_presupuestos(sesion: SesionDependencia) -> PresupuestoSe
 ServicioDePresupuestos = Annotated[PresupuestoService, Depends(obtener_servicio_de_presupuestos)]
 
 
+def obtener_servicio_de_metodos_pago(sesion: SesionDependencia) -> MetodoPagoService:
+    """Arma el servicio de métodos de pago con sus repositorios sobre la sesion actual."""
+    return MetodoPagoService(MetodoPagoRepository(sesion), UsuarioRepository(sesion))
+
+
+ServicioDeMetodosPago = Annotated[MetodoPagoService, Depends(obtener_servicio_de_metodos_pago)]
+
+
+def obtener_servicio_de_compras(sesion: SesionDependencia) -> CompraService:
+    """Arma el servicio de lectura de compras sobre la sesion actual."""
+    return CompraService(CompraRepository(sesion), UsuarioRepository(sesion))
+
+
+ServicioDeCompras = Annotated[CompraService, Depends(obtener_servicio_de_compras)]
+
+
+def obtener_servicio_de_bitacora() -> BitacoraComprasService:
+    """Arma el servicio de bitácora sobre la colección de Mongo compartida.
+
+    `obtener_coleccion_bitacora()` nunca falla por sí sola -la conexión es
+    perezosa- así que este servicio siempre se puede construir, incluso si
+    Mongo termina no respondiendo cuando de verdad se intenta escribir.
+    """
+    return BitacoraComprasService(obtener_coleccion_bitacora())
+
+
+ServicioDeBitacora = Annotated[BitacoraComprasService, Depends(obtener_servicio_de_bitacora)]
+
+
+def obtener_servicio_de_conciliacion(
+    sesion: SesionDependencia, cliente: ClienteHttpDependencia
+) -> ConciliacionService:
+    """Arma el servicio de conciliación con todos los repositorios que el
+    Proceso 2 necesita tocar en su transacción, más el servicio de comercios
+    (catálogo compartido) y el de tipo de cambio (opcional, igual que en
+    `CuentaCorreoService`)."""
+    return ConciliacionService(
+        CompraRepository(sesion),
+        LineaCompraRepository(sesion),
+        MetodoPagoRepository(sesion),
+        ReglaCategorizacionRepository(sesion),
+        PresupuestoRepository(sesion),
+        CategoriaRepository(sesion),
+        ComercioCategoriaRepository(sesion),
+        TipoCambioRepository(sesion),
+        ComprobanteRepository(sesion),
+        obtener_servicio_de_comercios(sesion),
+        obtener_servicio_de_tipo_cambio(cliente),
+        obtener_servicio_de_bitacora(),
+    )
+
+
+ServicioDeConciliacion = Annotated[ConciliacionService, Depends(obtener_servicio_de_conciliacion)]
+
+
 _servicio_de_tipo_cambio: TipoCambioService | None = None
 
 
@@ -141,12 +211,16 @@ def obtener_servicio_de_auth(
     El proveedor de Google queda en `None` -y "Iniciar sesión con Google"
     da un error claro en vez de arrancar mal- si no hay credenciales de
     Google configuradas; mismo criterio que Outlook/Gmail para leer correo.
+
+    Recibe también el servicio de categorías, para sembrar la jerarquía
+    estándar de todo titular nuevo justo al registrarse -ver
+    `CategoriaService.sembrar_estandar`.
     """
     configuracion = obtener_configuracion()
     google = (
         IdentidadGoogleProveedor(cliente, configuracion) if configuracion.google_client_id else None
     )
-    return AuthService(UsuarioRepository(sesion), google)
+    return AuthService(UsuarioRepository(sesion), google, obtener_servicio_de_categorias(sesion))
 
 
 ServicioDeAuth = Annotated[AuthService, Depends(obtener_servicio_de_auth)]

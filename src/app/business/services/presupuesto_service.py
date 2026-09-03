@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.business.errors import DatosInvalidos, RecursoNoEncontrado, ReglaDeNegocioViolada
-from app.business.services.comercio_service import ComercioClasificado
 from app.data.models.enums import EstadoPresupuesto, Moneda
 from app.data.models.presupuesto import Presupuesto
 from app.data.repositories.categoria_repository import CategoriaRepository
@@ -39,10 +38,10 @@ class EstadoDePresupuesto:
 class PresupuestoService:
     """Aplica las reglas del dominio sobre los presupuestos de un titular.
 
-    No lee correo ni sabe qué es un comercio: `calcular_estados` recibe la
-    clasificación ya hecha (`ComercioService.clasificar_comprobantes`) y solo
-    hace la cuenta. Mantiene esta parte -la que puede tener un error de
-    cálculo o de regla- separada de la que sabe hablar con Microsoft/Google.
+    No lee correo ni sabe qué es un comercio: `calcular_estados` solo lee el
+    límite y el consumo ya acumulado de cada presupuesto -acumularlo es
+    trabajo de `ConciliacionService`, dentro de la transacción que registra
+    cada compra real.
     """
 
     def __init__(
@@ -117,51 +116,28 @@ class PresupuestoService:
         self.presupuestos.sesion.delete(presupuesto)
         self.presupuestos.sesion.commit()
 
-    def calcular_estados(
-        self,
-        usuario_id: int,
-        anio: int,
-        mes: int,
-        comercios_clasificados: list[ComercioClasificado],
-    ) -> list[EstadoDePresupuesto]:
-        """Combina los presupuestos del período con el gasto real ya clasificado por comercio.
+    def calcular_estados(self, usuario_id: int, anio: int, mes: int) -> list[EstadoDePresupuesto]:
+        """El estado de cada presupuesto del período, con su consumo ya acumulado.
 
-        `comercios_clasificados` viene de `ComercioService.clasificar_comprobantes`
-        sobre los comprobantes reales del mismo período -este método no lee
-        correo ni conoce comercios, solo suma lo que ya le clasificaron.
-        Un comercio sin categoría asignada todavía (`categoria_id is None`) no
-        cuenta para ningún presupuesto: no hay forma honesta de saber a cuál
-        categoría le pertenece ese gasto hasta que alguien lo clasifique.
+        `Presupuesto.monto_consumido` lo acumula `ConciliacionService` dentro
+        de la misma transacción que registra cada compra real -esta función
+        ya no recalcula nada a partir de los comprobantes: solo lee el
+        límite y el consumo ya guardados y calcula el porcentaje y el
+        estado. Antes de que existiera esa conciliación, esto combinaba el
+        límite con `ComercioService.clasificar_comprobantes` en cada
+        llamada; ahora esa cuenta vive en la fila.
         """
         presupuestos = self.listar_del_periodo(usuario_id, anio, mes)
         if not presupuestos:
             return []
-
-        # Clave (categoria_id, moneda), no solo categoria_id: una misma
-        # categoría puede tener comercios clasificados en más de una moneda
-        # (p. ej. "Transporte" con un peaje en colones y un Uber en dólares).
-        # Sumarlos juntos violaría la regla de nunca mezclar monedas -un
-        # presupuesto es de una moneda concreta (`Presupuesto.moneda`), así
-        # que solo cuenta el gasto que esté en esa misma moneda.
-        consumido_por_categoria: dict[tuple[int, str], Decimal] = {}
-        for comercio in comercios_clasificados:
-            if comercio.categoria_id is None:
-                continue
-            clave = (comercio.categoria_id, comercio.moneda)
-            consumido_por_categoria[clave] = (
-                consumido_por_categoria.get(clave, Decimal("0")) + comercio.total
-            )
 
         estados = []
         for presupuesto in presupuestos:
             categoria = self.categorias.obtener_por_id(presupuesto.categoria_id)
             if categoria is None:
                 continue
-            consumido = consumido_por_categoria.get(
-                (presupuesto.categoria_id, presupuesto.moneda.value), Decimal("0")
-            )
             porcentaje, estado = self.calcular_estado(
-                consumido, presupuesto.monto_limite, presupuesto.umbral_alerta
+                presupuesto.monto_consumido, presupuesto.monto_limite, presupuesto.umbral_alerta
             )
             estados.append(
                 EstadoDePresupuesto(
@@ -172,7 +148,7 @@ class PresupuestoService:
                     mes=presupuesto.mes,
                     moneda=presupuesto.moneda.value,
                     monto_limite=presupuesto.monto_limite,
-                    monto_consumido=consumido,
+                    monto_consumido=presupuesto.monto_consumido,
                     umbral_alerta=presupuesto.umbral_alerta,
                     porcentaje_usado=porcentaje,
                     estado=estado,

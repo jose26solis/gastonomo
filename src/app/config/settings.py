@@ -83,6 +83,23 @@ class Configuracion:
     demo_correo: str
     demo_contrasena: str
 
+    # Mongo del subdominio documental (bitácora de trazabilidad de compras).
+    # Con default, a diferencia de las credenciales de OAuth: el `mongo` de
+    # `docker compose up -d` ya trae usuario/clave fijos para desarrollo, así
+    # que casi nadie necesita tocar esto -ver ADR-002 y BitacoraComprasService.
+    #
+    # La base es "gastonomo_app", NO "gastonomo": esa última es la que
+    # siembra `db/mongo/init/02_datos_de_ejemplo.js` para el Laboratorio 2,
+    # con compras de ejemplo numeradas 1-11. La app en vivo también numera
+    # sus propias compras empezando en 1 (autoincremental de PostgreSQL), así
+    # que compartir la misma base mezclaría eventos reales con la bitácora
+    # de ejemplo del mismo id -exactamente lo que pasó la primera vez que se
+    # probó esto en vivo, y lo que obligó a este cambio. Una base de Mongo
+    # nueva no necesita "crearse" aparte: existe la primera vez que algo
+    # escribe en ella.
+    mongo_url: str = "mongodb://gastonomo:gastonomo_local@localhost:27017"
+    mongo_db: str = "gastonomo_app"
+
 
 @lru_cache
 def obtener_configuracion() -> Configuracion:
@@ -130,6 +147,10 @@ def obtener_configuracion() -> Configuracion:
         bccr_token=os.getenv("GASTONOMO_BCCR_TOKEN", ""),
         demo_correo=os.getenv("GASTONOMO_DEMO_CORREO", "demo@gastonomo.cr"),
         demo_contrasena=os.getenv("GASTONOMO_DEMO_CONTRASENA", "demo1234"),
+        mongo_url=os.getenv(
+            "GASTONOMO_MONGO_URL", "mongodb://gastonomo:gastonomo_local@localhost:27017"
+        ),
+        mongo_db=os.getenv("GASTONOMO_MONGO_DB", "gastonomo_app"),
     )
 
 

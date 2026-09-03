@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from app.business.errors import CredencialesInvalidas, DatosInvalidos, ReglaDeNegocioViolada
 from app.business.seguridad.cifrado import TokenIlegible, cifrar, descifrar
 from app.business.seguridad.contrasenas import hashear_contrasena, verificar_contrasena
+from app.business.services.categoria_service import CategoriaService
 from app.business.services.identidad_google import IdentidadGoogleProveedor
 from app.data.models.usuario import Usuario
 from app.data.repositories.usuario_repository import UsuarioRepository
@@ -85,12 +86,17 @@ class AuthService:
         self,
         usuario_repository: UsuarioRepository,
         google: IdentidadGoogleProveedor | None = None,
+        categoria_service: CategoriaService | None = None,
     ) -> None:
         self.usuarios = usuario_repository
         # Opcional a propósito, igual que los proveedores de correo: sin
         # credenciales de Google configuradas, el resto del login sigue
         # funcionando -solo fallan los tres endpoints de /api/auth/google.
         self.google = google
+        # Opcional para no romper los constructores que ya arman este
+        # servicio a mano en las pruebas: sin él, una cuenta nueva se sigue
+        # creando igual, solo que sin el catálogo semilla de categorías.
+        self.categoria_service = categoria_service
 
     def registrar(self, comando: RegistrarUsuarioComando) -> Sesion:
         """Crea la cuenta y devuelve una sesión ya iniciada -no hace falta loguearse aparte."""
@@ -120,6 +126,8 @@ class AuthService:
         )
         self.usuarios.agregar(usuario)
         self.usuarios.sesion.commit()
+        if self.categoria_service is not None:
+            self.categoria_service.sembrar_estandar(usuario.id)
         return Sesion(token=self._token_de(usuario), usuario=usuario)
 
     def iniciar_sesion(self, comando: IniciarSesionComando) -> Sesion:
@@ -181,6 +189,8 @@ class AuthService:
             )
             self.usuarios.agregar(usuario)
             self.usuarios.sesion.commit()
+            if self.categoria_service is not None:
+                self.categoria_service.sembrar_estandar(usuario.id)
 
         if not usuario.activo:
             raise CredencialesInvalidas("Esta cuenta está desactivada.")

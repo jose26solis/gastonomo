@@ -21,13 +21,20 @@ from app.business.errors import (
     ReglaDeNegocioViolada,
 )
 from app.config.cliente_http import cerrar_cliente_http
-from app.config.database import crear_tablas, sembrar_usuario_de_demostracion
+from app.config.cliente_mongo import cerrar_cliente_mongo
+from app.config.database import (
+    crear_tablas,
+    sembrar_categorias_estandar,
+    sembrar_usuario_de_demostracion,
+)
 from app.config.settings import obtener_configuracion
 from app.presentation.routers import (
     auth,
     categorias,
     comercios,
+    compras,
     cuentas_correo,
+    metodos_pago,
     presupuestos,
     reportes,
     salud,
@@ -41,9 +48,11 @@ configuracion = obtener_configuracion()
 async def ciclo_de_vida(app: FastAPI) -> AsyncIterator[None]:
     """Prepara el esquema antes de atender la primera peticion y cierra recursos al apagar."""
     crear_tablas()
+    sembrar_categorias_estandar()
     sembrar_usuario_de_demostracion()
     yield
     cerrar_cliente_http()
+    cerrar_cliente_mongo()
 
 
 app = FastAPI(
@@ -66,6 +75,8 @@ app.include_router(categorias.router)
 app.include_router(cuentas_correo.router)
 app.include_router(comercios.router)
 app.include_router(presupuestos.router)
+app.include_router(metodos_pago.router)
+app.include_router(compras.router)
 app.include_router(reportes.router)
 app.include_router(tipo_cambio.router)
 

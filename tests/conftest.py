@@ -17,21 +17,60 @@ from app.business.services.auth_service import (
     IniciarSesionComando,
     RegistrarUsuarioComando,
 )
+from app.business.services.bitacora_service import BitacoraComprasService
+from app.business.services.comercio_service import ComercioService
+from app.business.services.conciliacion_service import ConciliacionService
 from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.config.database import obtener_sesion
 from app.data.models.base import Base
 from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.categoria_repository import CategoriaRepository
+from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
+from app.data.repositories.comercio_repository import ComercioRepository
+from app.data.repositories.compra_repository import CompraRepository
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.linea_compra_repository import LineaCompraRepository
+from app.data.repositories.metodo_pago_repository import MetodoPagoRepository
+from app.data.repositories.presupuesto_repository import PresupuestoRepository
+from app.data.repositories.regla_categorizacion_repository import ReglaCategorizacionRepository
+from app.data.repositories.tipo_cambio_repository import TipoCambioRepository
 from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
 from app.presentation.dependencies import (
+    obtener_servicio_de_bitacora,
     obtener_servicio_de_cuentas_correo,
     obtener_servicio_de_tipo_cambio,
 )
 from tests.apoyos_correo import ProveedorDeCorreoFalso
+
+
+def _armar_conciliacion(sesion: Session) -> ConciliacionService:
+    """La misma conciliación real que arma `dependencies.py`, pero sin Mongo
+    -`BitacoraComprasService(None)` no escribe nada, igual que si Mongo no
+    estuviera configurado en este ambiente. Las pruebas que sí verifican la
+    bitácora usan su propio doble, no esta función."""
+    return ConciliacionService(
+        CompraRepository(sesion),
+        LineaCompraRepository(sesion),
+        MetodoPagoRepository(sesion),
+        ReglaCategorizacionRepository(sesion),
+        PresupuestoRepository(sesion),
+        CategoriaRepository(sesion),
+        ComercioCategoriaRepository(sesion),
+        TipoCambioRepository(sesion),
+        ComprobanteRepository(sesion),
+        ComercioService(
+            ComercioRepository(sesion),
+            ComercioCategoriaRepository(sesion),
+            CategoriaRepository(sesion),
+        ),
+        _tipo_de_cambio_de_la_prueba(),
+        BitacoraComprasService(None),
+    )
+
 
 # Contraseña del usuario de la fixture `usuario`. Vive acá -no en `usuario`
 # mismo, que solo expone el modelo ya creado- porque `cliente` la necesita
@@ -90,8 +129,17 @@ def cliente(sesion: Session, usuario: Usuario) -> Iterator[TestClient]:
     El cliente se usa sin `with` a proposito: asi no se dispara el ciclo de vida
     de la aplicacion, que crearia el archivo SQLite de desarrollo. Las tablas de
     la prueba ya las creo la fixture `sesion`, en memoria.
+
+    También reemplaza el servicio de bitácora por uno sin colección real
+    (`BitacoraComprasService(None)`): sin este override, cualquier prueba que
+    tocara `/api/compras/{id}/bitacora` -o cualquier conciliación real- se
+    quedaría intentando conectar a un Mongo real por 3 segundos (el timeout
+    de `obtener_coleccion_bitacora`) antes de fallar con gracia. Una prueba
+    que sí necesita verificar eventos reales pisa este mismo override con su
+    propio doble -ver `tests/test_compras_api.py`.
     """
     app.dependency_overrides[obtener_sesion] = lambda: sesion
+    app.dependency_overrides[obtener_servicio_de_bitacora] = lambda: BitacoraComprasService(None)
     sesion_de_auth = AuthService(UsuarioRepository(sesion)).iniciar_sesion(
         IniciarSesionComando(correo=usuario.correo, contrasena=CONTRASENA_DE_PRUEBA)
     )
@@ -142,6 +190,7 @@ def cliente_con_correo_falso(
             ComprobanteRepository(sesion),
             TransferenciaSinpeRepository(sesion),
             _tipo_de_cambio_de_la_prueba(),
+            _armar_conciliacion(sesion),
         )
 
     app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio
@@ -172,6 +221,7 @@ def cliente_con_dos_buzones(cliente: TestClient, sesion: Session) -> Iterator[Te
             ComprobanteRepository(sesion),
             TransferenciaSinpeRepository(sesion),
             _tipo_de_cambio_de_la_prueba(),
+            _armar_conciliacion(sesion),
         )
 
     app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio

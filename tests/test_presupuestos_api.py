@@ -119,16 +119,11 @@ def test_presupuestos_del_periodo_combina_limite_con_gasto_real(
     ).json()
     categoria_id = _crear_categoria(cliente_con_correo_falso, usuario.id, "Alimentación")
 
-    # Se necesita clasificar el comercio primero para que el gasto cuente.
-    comercios = cliente_con_correo_falso.get(
-        f"/api/cuentas-correo/{vinculada['id']}/comercios", params={"usuario_id": usuario.id}
-    ).json()
-    comercio_id = comercios[0]["comercio_id"]
-    cliente_con_correo_falso.post(
-        f"/api/comercios/{comercio_id}/categoria",
-        json={"usuario_id": usuario.id, "categoria_id": categoria_id},
-    )
-
+    # El presupuesto tiene que existir ANTES de categorizar el comercio: el
+    # consumo se acumula en el momento en que hay a dónde acumularlo -ver
+    # ConciliacionService.recategorizar_compras_de_comercio. Un presupuesto
+    # creado después de que la compra ya se conciliό no "adopta" gasto viejo
+    # solo -es la misma regla que aplica a cualquier compra ya conciliada.
     cliente_con_correo_falso.post(
         "/api/presupuestos",
         json={
@@ -139,6 +134,18 @@ def test_presupuestos_del_periodo_combina_limite_con_gasto_real(
             "moneda": "CRC",
             "monto_limite": "5000.00",
         },
+    )
+
+    # Se necesita clasificar el comercio para que el gasto cuente -la primera
+    # sincronización (disparada acá) todavía no sabe a qué categoría va,
+    # porque el comercio "WALMART SAN SEBASTIAN" es nuevo.
+    comercios = cliente_con_correo_falso.get(
+        f"/api/cuentas-correo/{vinculada['id']}/comercios", params={"usuario_id": usuario.id}
+    ).json()
+    comercio_id = comercios[0]["comercio_id"]
+    cliente_con_correo_falso.post(
+        f"/api/comercios/{comercio_id}/categoria",
+        json={"usuario_id": usuario.id, "categoria_id": categoria_id},
     )
 
     respuesta = cliente_con_correo_falso.get(
@@ -198,7 +205,7 @@ def test_presupuestos_del_periodo_no_arrastra_gasto_de_otro_mes(
     assert respuesta.status_code == 200
     estados = respuesta.json()
     assert len(estados) == 1
-    assert estados[0]["monto_consumido"] == "0"
+    assert estados[0]["monto_consumido"] == "0.00"
     assert estados[0]["estado"] == "EN_RANGO"
 
 

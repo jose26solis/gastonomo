@@ -12,6 +12,7 @@ from app.business.services.categoria_service import CategoriaService, CrearCateg
 from app.business.services.comercio_service import ComercioService, normalizar_nombre_comercio
 from app.data.models.enums import Moneda
 from app.data.models.usuario import Usuario
+from app.data.repositories.categoria_estandar_repository import CategoriaEstandarRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
 from app.data.repositories.comercio_repository import ComercioRepository
@@ -27,7 +28,9 @@ def servicio(sesion: Session) -> ComercioService:
 
 @pytest.fixture
 def categorias(sesion: Session) -> CategoriaService:
-    return CategoriaService(CategoriaRepository(sesion), UsuarioRepository(sesion))
+    return CategoriaService(
+        CategoriaRepository(sesion), UsuarioRepository(sesion), CategoriaEstandarRepository(sesion)
+    )
 
 
 def _comprobante(

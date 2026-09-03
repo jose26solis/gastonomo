@@ -43,6 +43,10 @@ class Comprobante(Base):
         ForeignKey("cuenta_correo.id"), nullable=False, index=True
     )
     mensaje_id: Mapped[str] = mapped_column(String(300), nullable=False)
+    # La `Compra` de negocio real que `ConciliacionService` creó a partir de
+    # este comprobante -NULL si la confianza del parseo no alcanzó para
+    # conciliar sola (queda en revisión manual). Ver conciliacion_service.py.
+    compra_id: Mapped[int | None] = mapped_column(ForeignKey("compra.id"), nullable=True)
 
     banco: Mapped[str] = mapped_column(String(80), nullable=False)
     comercio: Mapped[str | None] = mapped_column(String(200), nullable=True)

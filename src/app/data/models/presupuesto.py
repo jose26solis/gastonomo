@@ -12,17 +12,11 @@ from app.data.models.enums import Moneda
 class Presupuesto(Base):
     """Tope de gasto de una categoría de un titular en un año y mes concretos.
 
-    Solo guarda el **límite** -no `monto_consumido`-. La propuesta de dominio
-    original lo modela como un campo que Proceso 2 va acumulando con cada
-    compra, pero esa tubería transaccional todavía no existe: aunque los
-    comprobantes de BAC ya se cachean localmente (`Comprobante`), no hay
-    ninguna `Compra` de negocio persistida ni un proceso de conciliación que
-    vaya sumando un consumo guardado. Guardar un `monto_consumido` que nada
-    actualiza sería peor que no tenerlo -quedaría desactualizado desde el
-    primer día. En su lugar, el consumo se calcula cada vez que se consulta,
-    combinando este límite con los comercios reales ya clasificados
-    (`ComercioService.clasificar_comprobantes`) del mismo período. Ver
-    `PresupuestoService.calcular_estado`.
+    `monto_consumido` se acumula dentro de la misma transacción que registra
+    cada compra (`ConciliacionService`), no se recalcula en cada consulta: el
+    frontend lo muestra en vivo, y recalcular la suma de todas las compras
+    del mes en cada refresco de pantalla no escala. Anular una compra
+    devuelve su monto -nunca queda negativo.
     """
 
     __tablename__ = "presupuesto"
@@ -45,6 +39,7 @@ class Presupuesto(Base):
     mes: Mapped[int] = mapped_column(nullable=False)
     moneda: Mapped[Moneda] = mapped_column(Enum(Moneda), nullable=False)
     monto_limite: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    monto_consumido: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     umbral_alerta: Mapped[int] = mapped_column(nullable=False, default=80)
 
     def __repr__(self) -> str:
