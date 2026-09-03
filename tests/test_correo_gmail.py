@@ -27,6 +27,8 @@ def _configuracion() -> Configuracion:
         origenes_permitidos=[],
         bccr_correo="",
         bccr_token="",
+        demo_correo="",
+        demo_contrasena="",
     )
 
 

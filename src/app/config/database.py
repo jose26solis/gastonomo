@@ -11,12 +11,6 @@ from app.data.models.base import Base
 from app.data.models.enums import Moneda
 from app.data.models.usuario import Usuario
 
-# Solo para una base recién creada, en una instalación nueva -no es la
-# contraseña de ninguna cuenta real ya existente (ver la nota de migración en
-# el README, sección "Registro y varios usuarios").
-_CORREO_DEMOSTRACION = "demo@gastonomo.cr"
-_CONTRASENA_DEMOSTRACION = "demo1234"
-
 _configuracion = obtener_configuracion()
 
 # check_same_thread solo aplica a SQLite: uvicorn atiende las peticiones en un
@@ -51,6 +45,14 @@ def sembrar_usuario_de_demostracion() -> None:
     `contrasena_hash` que no era un hash de nada ("pendiente-laboratorio-de-
     autenticacion"): servía mientras el `usuario_id` se escribía a mano en la
     URL, pero con login real ese valor nunca calzaría con ninguna contraseña.
+
+    El correo y la contraseña salen de `GASTONOMO_DEMO_CORREO`/
+    `GASTONOMO_DEMO_CONTRASENA` (`.env`, gitignorado) y no de una constante
+    en este archivo -que sí se sube al repositorio- para que la contraseña
+    de verdad nunca quede en texto plano en el control de versiones. Los
+    valores por defecto (`demo@gastonomo.cr`/`demo1234`) solo entran a jugar
+    en una base nueva sin `.env` -CI, un clon recién hecho- y no son un
+    secreto real de nadie.
     """
     with FabricaDeSesiones() as sesion:
         if sesion.scalars(select(Usuario).limit(1)).first() is not None:
@@ -58,8 +60,8 @@ def sembrar_usuario_de_demostracion() -> None:
         sesion.add(
             Usuario(
                 nombre_completo="Usuario de demostracion",
-                correo=_CORREO_DEMOSTRACION,
-                contrasena_hash=hashear_contrasena(_CONTRASENA_DEMOSTRACION),
+                correo=_configuracion.demo_correo,
+                contrasena_hash=hashear_contrasena(_configuracion.demo_contrasena),
                 moneda_preferida=Moneda.CRC,
             )
         )

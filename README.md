@@ -472,11 +472,16 @@ cada endpoint exige que la sesión activa sea la de ese mismo titular
 datos de otro id da `403`, no los datos de otro id. Las contraseñas se guardan con
 [bcrypt](https://pypi.org/project/bcrypt/), nunca en claro.
 
-> **Cuenta de prueba:** una base recién creada siembra `demo@gastonomo.cr` / `demo1234`
+> **Cuenta de prueba:** una base recién creada siembra un usuario de prueba
 > ([`sembrar_usuario_de_demostracion`](src/app/config/database.py)) para poder probar la API sin
-> pasar por el registro. En una base que ya tenía usuarios de antes de que este login existiera -la
-> de este mismo repositorio en desarrollo, por ejemplo- esa contraseña se puso a mano una sola vez
-> con `hashear_contrasena("demo1234")`; no hay una migración de datos que la reponga sola.
+> pasar por el registro, con el correo y la contraseña de `GASTONOMO_DEMO_CORREO`/
+> `GASTONOMO_DEMO_CONTRASENA` en `.env` -por defecto, si no están seteadas,
+> `demo@gastonomo.cr` / `demo1234`. Viven en `.env` (gitignorado) y no como constante en el código
+> a propósito: ese archivo sí se sube al repositorio, y una contraseña real -aunque sea la de una
+> cuenta de prueba- no debería quedar en texto plano ahí. En una base que ya tenía usuarios de
+> antes de que este login existiera -la de este mismo repositorio en desarrollo, por ejemplo- esa
+> contraseña se puso a mano una sola vez con `hashear_contrasena(...)`; no hay una migración de
+> datos que la reponga sola.
 
 ### Iniciar sesión con Google
 
@@ -778,7 +783,7 @@ Pendiente:
 - [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
 - [ ] Recuperar una contraseña olvidada -hoy hace falta estar logueado para cambiarla; si no hay
       ninguna sesión con ese correo, no hay forma de recuperar el acceso
-- [ ] Pruebas automatizadas de frontend (el backend tiene 225 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 227 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta

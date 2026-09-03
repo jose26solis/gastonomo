@@ -74,6 +74,15 @@ class Configuracion:
     bccr_correo: str
     bccr_token: str
 
+    # Usuario de prueba que `sembrar_usuario_de_demostracion()` crea en una
+    # base recién creada -no una cuenta real. Vive acá y no como constante en
+    # `database.py` para que la contraseña de verdad quede en `.env`
+    # (gitignorado) y no en un archivo que se sube al repositorio; los
+    # valores por defecto (`demo@gastonomo.cr`/`demo1234`) solo importan para
+    # una base nueva sin `.env` -CI, un clon recién hecho- y no son secretos.
+    demo_correo: str
+    demo_contrasena: str
+
 
 @lru_cache
 def obtener_configuracion() -> Configuracion:
@@ -119,6 +128,8 @@ def obtener_configuracion() -> Configuracion:
         origenes_permitidos=_obtener_origenes_permitidos(),
         bccr_correo=os.getenv("GASTONOMO_BCCR_CORREO", ""),
         bccr_token=os.getenv("GASTONOMO_BCCR_TOKEN", ""),
+        demo_correo=os.getenv("GASTONOMO_DEMO_CORREO", "demo@gastonomo.cr"),
+        demo_contrasena=os.getenv("GASTONOMO_DEMO_CONTRASENA", "demo1234"),
     )
 
 
