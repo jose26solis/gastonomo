@@ -41,6 +41,7 @@ from app.presentation.dependencies import (
     VerificarTitular,
 )
 from app.presentation.schemas import (
+    BancoDetectadoResponse,
     ComercioClasificadoResponse,
     ComprobanteConFuenteResponse,
     ComprobanteParseadoResponse,
@@ -214,6 +215,28 @@ def resumen_financiero_de_usuario(
         por_mes=[ResumenMensualResponse.model_validate(r) for r in agrupar_por_mes(comprobantes)],
         conversion=TipoDeCambioResponse.model_validate(conversion) if conversion else None,
     )
+
+
+@router.get(
+    "/bancos",
+    response_model=list[BancoDetectadoResponse],
+    summary="Remitentes que parecen bancos, detectados en todas las cuentas activas del titular",
+)
+def bancos_detectados(
+    servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=30, gt=0, le=100),
+) -> list[BancoDetectadoResponse]:
+    """Busca "banco" en cada buzón activo y agrupa los remitentes por dominio.
+
+    No sincroniza ni guarda nada -a diferencia de `/resumen-financiero`, acá
+    no hay ningún `Comprobante` que persistir para un remitente sin parser.
+    Cada resultado es un candidato, no una confirmación (ver la nota en
+    `BancoDetectado`, business/services/cuenta_correo_service.py).
+    """
+    detectados = servicio.detectar_bancos(usuario_id, limite)
+    return [BancoDetectadoResponse.model_validate(b) for b in detectados]
 
 
 @router.get(

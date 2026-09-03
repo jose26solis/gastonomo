@@ -129,6 +129,28 @@ class OutlookProveedor:
             )
         return mensajes[:limite]
 
+    def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
+        """`$search` sin el prefijo `from:` es texto libre de Graph -mira remitente, asunto
+        y cuerpo. Sin reconfirmar nada del lado del cliente después: a diferencia de
+        `listar_mensajes_recientes`, acá no hay una sola subcadena exacta que el texto
+        tenga que cumplir -puede calzar en cualquiera de los tres campos.
+        """
+        encabezados = self._encabezado(token_acceso)
+        encabezados["ConsistencyLevel"] = "eventual"
+        respuesta = self._cliente.get(
+            "https://graph.microsoft.com/v1.0/me/messages",
+            headers=encabezados,
+            params={
+                "$select": "id,subject,from,receivedDateTime",
+                "$search": f'"{texto}"',
+                "$top": limite,
+            },
+        )
+        cuerpo = self._cuerpo_o_error(respuesta, "buscando mensajes de Outlook")
+        mensajes = [self._mensaje_desde_json(mensaje) for mensaje in cuerpo.get("value", [])]
+        mensajes.sort(key=lambda m: m.recibido_en or datetime.min.replace(tzinfo=UTC), reverse=True)
+        return mensajes[:limite]
+
     def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
         # El encabezado Prefer le pide a Graph que convierta el cuerpo a texto
         # plano de su lado. Sin él, "body.content" viene en HTML -BAC manda

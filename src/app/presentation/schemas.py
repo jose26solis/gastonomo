@@ -285,6 +285,25 @@ class ComercioResponse(BaseModel):
     provincia: str | None
 
 
+class BancoDetectadoResponse(BaseModel):
+    """Un remitente que parece un banco, encontrado buscando "banco" en un buzón vinculado.
+
+    Es un candidato, no una confirmación -ver la nota en `BancoDetectado`
+    (business/services/cuenta_correo_service.py).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    dominio: str
+    remitente_ejemplo: str
+    cantidad_mensajes: int
+    mensaje_mas_reciente: datetime | None
+    es_bac: bool
+    cuenta_correo_id: int
+    proveedor: ProveedorCorreo
+    direccion: str
+
+
 class ComercioClasificadoResponse(BaseModel):
     """Un comercio real, resuelto del catálogo, con su categoría sugerida (si la hay)."""
 

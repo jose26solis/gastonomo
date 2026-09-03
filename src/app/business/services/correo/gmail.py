@@ -117,6 +117,22 @@ class GmailProveedor:
             for mensaje in cuerpo.get("messages", [])
         ]
 
+    def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
+        """`q` sin el prefijo `from:` es búsqueda de texto libre de Gmail -mira remitente,
+        asunto y cuerpo, igual que la caja de búsqueda de gmail.com.
+        """
+        parametros: dict[str, str | int] = {"maxResults": limite, "q": texto}
+        listado = self._cliente.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers=self._encabezado(token_acceso),
+            params=parametros,
+        )
+        cuerpo = self._cuerpo_o_error(listado, "buscando mensajes de Gmail")
+        return [
+            self._leer_mensaje(token_acceso, mensaje["id"])
+            for mensaje in cuerpo.get("messages", [])
+        ]
+
     def obtener_cuerpo_de_mensaje(self, token_acceso: str, identificador: str) -> str:
         respuesta = self._cliente.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{identificador}",

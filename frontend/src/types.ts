@@ -162,3 +162,19 @@ export interface TipoDeCambio {
   compra: string;
   venta: string;
 }
+
+/**
+ * Un remitente que parece un banco, encontrado buscando "banco" en un buzón
+ * vinculado. Es un candidato, no una confirmación: solo BAC tiene un parser
+ * real hoy -el resto son pistas de a qué otro banco vale la pena agregarle soporte.
+ */
+export interface BancoDetectado {
+  dominio: string;
+  remitente_ejemplo: string;
+  cantidad_mensajes: number;
+  mensaje_mas_reciente: string | null;
+  es_bac: boolean;
+  cuenta_correo_id: number;
+  proveedor: Proveedor;
+  direccion: string;
+}

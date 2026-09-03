@@ -1,5 +1,6 @@
 """Reglas de negocio de las cuentas de correo vinculadas."""
 
+import re
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -115,6 +116,42 @@ def convertidos_a(
             )
         )
     return convertidos
+
+
+@dataclass(frozen=True)
+class BancoDetectado:
+    """Un remitente que parece un banco, agrupado de los resultados de buscar "banco".
+
+    Es un candidato, no una confirmación: que "banco" aparezca en el asunto
+    o el cuerpo de un correo no garantiza que el remitente sea financiero de
+    verdad -podría ser un boletín que lo menciona de pasada. `es_bac` marca
+    el único caso que además de detectarse ya se lee de verdad
+    (`comprobante_bac.py`); el resto son candidatos sin parser todavía.
+    """
+
+    dominio: str
+    remitente_ejemplo: str
+    cantidad_mensajes: int
+    mensaje_mas_reciente: datetime | None
+    es_bac: bool
+    cuenta_correo_id: int
+    proveedor: ProveedorCorreo
+    direccion: str
+
+
+_PATRON_CORREO = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)")
+
+
+def _dominio_de(remitente: str) -> str:
+    """Saca el dominio de un remitente, sea `correo@dominio.cr` o `Nombre <correo@dominio.cr>`.
+
+    Gmail devuelve el encabezado `From` tal cual vino en el correo -puede
+    traer el nombre para mostrar delante-, mientras que Outlook ya entrega
+    la dirección sola. Buscar el patrón de correo en vez de asumir una
+    forma fija cubre los dos casos con el mismo código.
+    """
+    coincidencia = _PATRON_CORREO.search(remitente)
+    return coincidencia.group(1).lower() if coincidencia else remitente.lower()
 
 
 def _fila_desde_parseado(
@@ -352,6 +389,62 @@ class CuentaCorreoService:
         """
         comprobantes = [c.comprobante for c in self.comprobantes_de_usuario(usuario_id, limite)]
         return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
+
+    def detectar_bancos(self, usuario_id: int, limite: int = 30) -> list[BancoDetectado]:
+        """Busca "banco" en cada buzón activo del titular y agrupa los remitentes por dominio.
+
+        A diferencia de `comprobantes_de_usuario`, esto no sincroniza ni
+        guarda nada -es una búsqueda de punta a punta, sin caché, porque no
+        hay ningún `Comprobante` que persistir para un remitente que
+        todavía no tiene parser. Sirve para que la pantalla de Bancos deje
+        de mostrar una lista inventada y muestre en su lugar qué otros
+        bancos parecen estar escribiéndole al titular, aunque Gastonomo
+        todavía no sepa leerlos.
+        """
+        self._asegurar_usuario_activo(usuario_id)
+        cuentas_activas = [
+            c
+            for c in self.cuentas.listar_de_usuario(usuario_id)
+            if c.estado == EstadoCuentaCorreo.ACTIVA
+        ]
+
+        agrupado: dict[tuple[int, str], list[MensajeResumido]] = {}
+        cuenta_por_grupo: dict[tuple[int, str], CuentaCorreo] = {}
+        for cuenta in cuentas_activas:
+            try:
+                token = self._token_acceso_vigente(cuenta)
+                mensajes = self._proveedor(cuenta.proveedor).buscar_por_texto(
+                    token, "banco", limite
+                )
+            except (ReglaDeNegocioViolada, ErrorDeProveedorExterno):
+                continue
+            for mensaje in mensajes:
+                clave = (cuenta.id, _dominio_de(mensaje.remitente))
+                agrupado.setdefault(clave, []).append(mensaje)
+                cuenta_por_grupo[clave] = cuenta
+
+        detectados = []
+        for (cuenta_id, dominio), mensajes in agrupado.items():
+            cuenta = cuenta_por_grupo[(cuenta_id, dominio)]
+            recibidos = [m.recibido_en for m in mensajes if m.recibido_en is not None]
+            detectados.append(
+                BancoDetectado(
+                    dominio=dominio,
+                    remitente_ejemplo=mensajes[0].remitente,
+                    cantidad_mensajes=len(mensajes),
+                    mensaje_mas_reciente=max(recibidos) if recibidos else None,
+                    es_bac=DOMINIO_REMITENTE_BAC in dominio,
+                    cuenta_correo_id=cuenta.id,
+                    proveedor=cuenta.proveedor,
+                    direccion=cuenta.direccion,
+                )
+            )
+        # BAC primero -ya se lee de verdad-, después por cuántos mensajes se
+        # encontraron: un dominio con un solo mensaje suelto es más probable
+        # que sea ruido ("banco de preguntas", una promoción que lo nombra de
+        # pasada) que uno con varios.
+        detectados.sort(key=lambda b: (not b.es_bac, -b.cantidad_mensajes))
+        return detectados
 
     def sincronizar(
         self, usuario_id: int, cuenta_id: int, limite: int = 200

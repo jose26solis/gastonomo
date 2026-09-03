@@ -7,6 +7,7 @@
  */
 
 import type {
+  BancoDetectado,
   Categoria,
   ComercioClasificado,
   ComprobanteParseado,
@@ -236,6 +237,16 @@ export const api = {
     return peticion(`/api/cuentas-correo/${cuentaId}?usuario_id=${usuarioId}`, {
       method: "DELETE",
     });
+  },
+
+  /**
+   * Busca la palabra "banco" en todas las cuentas activas del titular y
+   * agrupa lo que encuentra por dominio del remitente. Es una detección, no
+   * una conexión real: solo BAC tiene parser hoy, el resto son candidatos.
+   */
+  detectarBancos(usuarioId: number, limite = 30): Promise<BancoDetectado[]> {
+    const parametros = new URLSearchParams({ usuario_id: String(usuarioId), limite: String(limite) });
+    return peticion(`/api/cuentas-correo/bancos?${parametros.toString()}`);
   },
 
   // ---- Categorías ----

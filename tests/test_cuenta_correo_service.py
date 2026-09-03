@@ -12,6 +12,7 @@ from app.business.errors import (
     ReglaDeNegocioViolada,
 )
 from app.business.seguridad.cifrado import descifrar
+from app.business.services.correo.proveedor import MensajeResumido
 from app.business.services.cuenta_correo_service import CuentaCorreoService, VincularCuentaComando
 from app.data.models.enums import EstadoCuentaCorreo, Moneda, ProveedorCorreo
 from app.data.models.usuario import Usuario
@@ -334,3 +335,56 @@ def test_no_deja_ver_una_cuenta_de_otro_titular(
 
     with pytest.raises(RecursoNoEncontrado):
         servicio.probar_conexion(otro.id, cuenta.id)
+
+
+# ---- detectar_bancos ----
+
+
+def test_detectar_bancos_agrupa_por_dominio_y_marca_bac(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    _vincular(servicio, usuario)
+
+    detectados = servicio.detectar_bancos(usuario.id)
+
+    dominios = {b.dominio: b for b in detectados}
+    assert "pricesmart.com" not in dominios, "ese correo no menciona 'banco' en ningún lado"
+    assert dominios["baccredomatic.cr"].es_bac is True
+    assert dominios["baccredomatic.cr"].cantidad_mensajes == 1
+    assert dominios["bncr.fi.cr"].es_bac is False
+
+
+def test_detectar_bancos_pone_bac_primero(servicio: CuentaCorreoService, usuario: Usuario) -> None:
+    _vincular(servicio, usuario)
+
+    detectados = servicio.detectar_bancos(usuario.id)
+
+    assert detectados[0].es_bac is True
+
+
+def test_detectar_bancos_saca_el_dominio_de_un_remitente_con_nombre_para_mostrar(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    """Gmail puede devolver "Nombre <correo@dominio>" en vez del correo solo -ver
+    `_dominio_de` en cuenta_correo_service.py."""
+    _vincular(servicio, usuario)
+    servicio.proveedores[ProveedorCorreo.OUTLOOK].buscar_por_texto = (  # type: ignore[attr-defined]
+        lambda token, texto, limite: [
+            MensajeResumido(
+                identificador="9",
+                remitente="Banco Nacional <avisos@bncr.fi.cr>",
+                asunto="Su banco",
+                recibido_en=datetime.now(UTC),
+            )
+        ]
+    )
+
+    detectados = servicio.detectar_bancos(usuario.id)
+
+    assert detectados[0].dominio == "bncr.fi.cr"
+
+
+def test_detectar_bancos_sin_ninguna_cuenta_vinculada_no_falla(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    assert servicio.detectar_bancos(usuario.id) == []

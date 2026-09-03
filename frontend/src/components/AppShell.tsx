@@ -85,7 +85,9 @@ export function AppShell({
             <Reportes usuarioId={usuarioId} onIrAConectar={() => setPantalla("conectar")} />
           )}
           {pantalla === "conectar" && <ConectarCorreo usuarioId={usuarioId} />}
-          {pantalla === "bancos" && <Bancos />}
+          {pantalla === "bancos" && (
+            <Bancos usuarioId={usuarioId} onIrAConectar={() => setPantalla("conectar")} />
+          )}
           {pantalla === "ajustes" && (
             <Ajustes usuario={usuario} onActualizarUsuario={onActualizarUsuario} />
           )}

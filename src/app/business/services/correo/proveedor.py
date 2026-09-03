@@ -70,3 +70,17 @@ class ProveedorDeCorreo(Protocol):
         líneas `Etiqueta: valor`- nunca tenga que lidiar con etiquetas HTML.
         """
         ...
+
+    def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
+        """Busca `texto` en cualquier parte del mensaje -remitente, asunto, cuerpo- no
+        solo en la dirección del remitente como `listar_mensajes_recientes`.
+
+        Es lo que usa `detectar_bancos`: buscar la palabra "banco" encuentra
+        notificaciones de bancos que todavía no tienen parser propio, no
+        solo las de BAC Credomatic que ya se leen con confianza. No filtra
+        ni ordena del lado del cliente -a diferencia de
+        `listar_mensajes_recientes`, acá no hay una subcadena exacta contra
+        la que reconfirmar- así que el orden y qué tan bien calza cada
+        resultado los decide el buscador de cada proveedor.
+        """
+        ...

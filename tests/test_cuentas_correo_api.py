@@ -462,3 +462,41 @@ def test_un_timeout_del_tipo_de_cambio_no_tumba_la_sincronizacion(
 
     assert respuesta.status_code == 200
     assert len(respuesta.json()["comprobantes"]) == 1
+
+
+def test_bancos_detectados_agrupa_por_dominio_y_marca_bac(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    estado = _codificar_estado(usuario.id)
+    cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    )
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/bancos", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    dominios = {b["dominio"]: b for b in cuerpo}
+    assert dominios["baccredomatic.cr"]["es_bac"] is True
+    assert dominios["bncr.fi.cr"]["es_bac"] is False
+    assert "pricesmart.com" not in dominios
+
+
+def test_bancos_detectados_de_otro_titular_se_traduce_a_403(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion
+) -> None:
+    otro = Usuario(
+        nombre_completo="Otra persona",
+        correo="otra-persona-bancos@gastonomo.cr",
+        contrasena_hash="hash",
+    )
+    sesion.add(otro)
+    sesion.commit()
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/bancos", params={"usuario_id": otro.id}
+    )
+
+    assert respuesta.status_code == 403

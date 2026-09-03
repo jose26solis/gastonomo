@@ -88,3 +88,30 @@ class ProveedorDeCorreoFalso:
             raise ErrorDeProveedorExterno(f"Mensaje {identificador} inexistente en la prueba.")
         self.cuerpos_leidos.append(identificador)
         return _CUERPOS_DE_MENSAJE[identificador]
+
+    def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
+        """Simula una búsqueda de texto libre: a diferencia del filtro por remitente,
+        esta sí encuentra el mensaje que no es de BAC -es justo el caso que
+        `detectar_bancos` necesita poder ver.
+        """
+        mensajes = [
+            MensajeResumido(
+                identificador="1",
+                remitente="NotificacionBAC@baccredomatic.cr",
+                asunto="Su banco le confirma una transaccion",
+                recibido_en=datetime.now(UTC),
+            ),
+            MensajeResumido(
+                identificador="2",
+                remitente="promociones@pricesmart.com",
+                asunto="Ofertas de la semana",
+                recibido_en=datetime.now(UTC),
+            ),
+            MensajeResumido(
+                identificador="3",
+                remitente="avisos@bncr.fi.cr",
+                asunto="Su banco le informa",
+                recibido_en=datetime.now(UTC) - timedelta(days=1),
+            ),
+        ]
+        return [m for m in mensajes if texto.lower() in (m.remitente + m.asunto).lower()][:limite]

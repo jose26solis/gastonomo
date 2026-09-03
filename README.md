@@ -359,6 +359,7 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/cuentas-correo/gmail/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Gmail |
 | `GET` | `/api/cuentas-correo?usuario_id=1` | Lista los buzones vinculados de un usuario |
 | `GET` | `/api/cuentas-correo/resumen-financiero?usuario_id=1` | **Combina** todos los buzones activos y suma por mes; cada comprobante viene marcado con el buzón del que salió. Con `&moneda=CRC` (o `USD`) convierte todo a esa moneda y devuelve la tasa usada en `conversion` |
+| `GET` | `/api/cuentas-correo/bancos?usuario_id=1` | Busca "banco" en todos los buzones activos y agrupa los remitentes por dominio -candidatos, no confirmaciones: solo BAC tiene parser |
 | `GET` | `/api/cuentas-correo/comercios?usuario_id=1` | Clasifica los comercios de todos los buzones activos |
 | `GET` | `/api/cuentas-correo/presupuestos?usuario_id=1&anio=2026&mes=9` | Estado de los presupuestos contra el gasto real de todos los buzones activos |
 | `GET` | `/api/cuentas-correo/reportes/movimientos.csv?usuario_id=1` | Exporta a CSV los movimientos de todos los buzones activos (ídem `.xlsx` y `resumen.pdf`) |
@@ -606,7 +607,7 @@ vinculado, estas pantallas quedan disponibles:
 | **Presupuestos** | Alta y baja de presupuestos reales por categoría y período, con su estado calculado contra el gasto real |
 | **Reportes** | Descarga de CSV, Excel y PDF de los movimientos reales |
 | **Conectar correo** | Vincular o desvincular Outlook y Gmail |
-| **Bancos** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
+| **Bancos** | Busca "banco" de verdad en los buzones vinculados y agrupa por dominio del remitente; BAC aparece "Conectado" (tiene parser), el resto queda marcado como candidato sin soporte todavía |
 | **Ajustes** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
 
 Cada comprobante de BAC se lee y se guarda una sola vez -ver
@@ -783,7 +784,7 @@ Pendiente:
 - [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
 - [ ] Recuperar una contraseña olvidada -hoy hace falta estar logueado para cambiarla; si no hay
       ninguna sesión con ese correo, no hay forma de recuperar el acceso
-- [ ] Pruebas automatizadas de frontend (el backend tiene 227 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 233 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta
