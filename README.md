@@ -185,10 +185,17 @@ un balance único. No es lo mismo que mezclar a ciegas: hay una tasa real detrá
 cuál y de qué día, y cada movimiento convertido sigue mostrando el monto que el banco cobró de
 verdad. Dos advertencias que la propia pantalla hace explícitas:
 
-- **Se usa una sola tasa, la de hoy, también para los meses anteriores.** Lo correcto sería la del
-  día de cada compra, pero eso necesita consultas históricas al BCCR (ver más abajo).
+- **Cada comprobante se convierte con el tipo de cambio de venta que regía cuando se
+  sincronizó**, no con el de hoy -`Comprobante.tipo_cambio_venta`/`tipo_cambio_fecha` lo guardan al
+  sincronizar, junto con el gasto. Como una bandeja normalmente se sincroniza el mismo día o al
+  siguiente de la compra, en la práctica es la tasa de la compra. Los comprobantes que ya estaban
+  guardados antes de que existiera esta columna no tienen tasa propia y caen a la de hoy; la
+  pantalla dice cuántos de los que se están mostrando están en ese caso.
 - Se convierte con el tipo de cambio de **venta** en las dos direcciones, para que convertir de ida
   y vuelta dé el mismo número. Una moneda que no sea CRC ni USD se deja sin tocar.
+- Si el tipo de cambio no está disponible al sincronizar (sin credenciales, o si el BCCR y
+  Hacienda fallan los dos), el comprobante se guarda igual, sin tasa -leer el correo nunca depende
+  de que un servicio de moneda responda.
 
 La fuente es el
 [Servicio Web de Indicadores Económicos](https://gee.bccr.fi.cr/Indicadores/Suscripciones/WS/wsindicadoreseconomicos.asmx)
@@ -265,6 +272,19 @@ GASTONOMO_URL_BASE_DATOS=postgresql+psycopg://gastonomo:gastonomo_local@localhos
 ```
 
 Sin esa variable, sigue usando SQLite exactamente como antes.
+
+> **Si ya tenías una base de PostgreSQL corriendo de antes:** `create_all()` crea las tablas que
+> faltan, pero no altera las que ya existen. Cuando una columna nueva se agrega a un modelo (como
+> `tipo_cambio_venta`/`tipo_cambio_fecha` en `comprobante`), una base nueva la recibe sola; una que
+> ya venía corriendo necesita el script correspondiente de
+> [`db/postgres/esquema-aplicacion/`](db/postgres/esquema-aplicacion/):
+>
+> ```bash
+> docker compose exec -T postgres psql -U gastonomo -d gastonomo \
+>   < db/postgres/esquema-aplicacion/001_tipo_cambio_en_comprobante.sql
+> ```
+>
+> Son idempotentes -correrlos de más no hace nada- así que ante la duda no está de más correrlos.
 
 ### 1. Clonar y crear el entorno virtual
 
@@ -584,7 +604,7 @@ Pendiente:
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
 - [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
-- [ ] Pruebas automatizadas de frontend (el backend tiene 173 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 179 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta

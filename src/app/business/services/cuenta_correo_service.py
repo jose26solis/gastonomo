@@ -1,7 +1,7 @@
 """Reglas de negocio de las cuentas de correo vinculadas."""
 
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from app.business.errors import ErrorDeProveedorExterno, RecursoNoEncontrado, ReglaDeNegocioViolada
@@ -13,7 +13,11 @@ from app.business.parsers.comprobante_bac import (
 from app.business.seguridad.cifrado import cifrar, descifrar
 from app.business.services.correo.proveedor import MensajeResumido, ProveedorDeCorreo
 from app.business.services.resumen_service import ResumenFinanciero, agrupar_por_mes
-from app.business.services.tipo_cambio_service import TipoDeCambio, convertir
+from app.business.services.tipo_cambio_service import (
+    TipoCambioService,
+    TipoDeCambio,
+    convertir,
+)
 from app.data.models.comprobante import Comprobante
 from app.data.models.cuenta_correo import CuentaCorreo
 from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
@@ -54,6 +58,11 @@ class ComprobanteConFuente:
     cuenta_correo_id: int
     proveedor: ProveedorCorreo
     direccion: str
+    # El tipo de cambio que se guardó junto al comprobante al sincronizarlo, si
+    # lo hubo. Es el que se prefiere al convertir: es más cercano a la fecha de
+    # la compra que el de hoy.
+    tipo_cambio_venta: Decimal | None = None
+    tipo_cambio_fecha: date | None = None
     # Lo que decía el comprobante antes de convertirlo, cuando se pidió el
     # resumen en una sola moneda. Se conserva para poder mostrar "$6.00" y no
     # solo el equivalente: el monto convertido es una referencia, el que el
@@ -72,12 +81,12 @@ def convertidos_a(
     no responde la pregunta. Convertir con una tasa real y decir cuál se usó
     sí la responde.
 
-    **Se convierte todo con una sola tasa**, la del día que traiga
-    `tipo_de_cambio`, incluidos los movimientos de meses anteriores. Lo
-    correcto sería usar la tasa del día de cada compra, pero eso necesita
-    consultas históricas al BCCR -que requieren suscripción, y el respaldo de
-    Hacienda solo publica el tipo de cambio del día. Quien muestre estos
-    totales tiene que decir con qué tasa se armaron; el frontend lo hace.
+    Cada comprobante se convierte con **la tasa que se le guardó al
+    sincronizarlo**, que es la que regía cerca de la fecha de la compra. Los
+    que no tengan ninguna -los que ya estaban guardados antes de que se
+    empezara a sellarlos- caen a `tipo_de_cambio`, el de hoy. Quien muestre
+    estos totales tiene que poder decir cuáles son cuáles; para eso cada
+    comprobante conserva `tipo_cambio_fecha`.
     """
     convertidos = []
     for item in items:
@@ -89,29 +98,36 @@ def convertidos_a(
         ):
             convertidos.append(item)
             continue
+        venta = item.tipo_cambio_venta or tipo_de_cambio.venta
         convertidos.append(
             replace(
                 item,
                 comprobante=replace(
                     comprobante,
-                    monto=convertir(
-                        comprobante.monto, comprobante.moneda, moneda_destino, tipo_de_cambio
-                    ),
+                    monto=convertir(comprobante.monto, comprobante.moneda, moneda_destino, venta),
                     moneda=moneda_destino,
                 ),
                 monto_original=comprobante.monto,
                 moneda_original=comprobante.moneda,
+                # Si se usó la de hoy por no haber guardada, queda dicho.
+                tipo_cambio_venta=venta,
+                tipo_cambio_fecha=item.tipo_cambio_fecha or tipo_de_cambio.fecha,
             )
         )
     return convertidos
 
 
 def _fila_desde_parseado(
-    cuenta_correo_id: int, mensaje_id: str, parseado: ComprobanteParseado
+    cuenta_correo_id: int,
+    mensaje_id: str,
+    parseado: ComprobanteParseado,
+    tipo_de_cambio: TipoDeCambio | None = None,
 ) -> Comprobante:
     return Comprobante(
         cuenta_correo_id=cuenta_correo_id,
         mensaje_id=mensaje_id,
+        tipo_cambio_venta=tipo_de_cambio.venta if tipo_de_cambio else None,
+        tipo_cambio_fecha=tipo_de_cambio.fecha if tipo_de_cambio else None,
         banco=parseado.banco,
         comercio=parseado.comercio,
         ciudad=parseado.ciudad,
@@ -162,11 +178,16 @@ class CuentaCorreoService:
         usuario_repository: UsuarioRepository,
         proveedores: dict[ProveedorCorreo, ProveedorDeCorreo],
         comprobante_repository: ComprobanteRepository,
+        tipo_cambio_service: TipoCambioService | None = None,
     ) -> None:
         self.cuentas = cuenta_correo_repository
         self.usuarios = usuario_repository
         self.proveedores = proveedores
         self.comprobantes = comprobante_repository
+        # Opcional a propósito: sin él la sincronización funciona igual, solo
+        # que los comprobantes quedan sin tipo de cambio guardado. Leer correo
+        # no puede depender de que un servicio de moneda esté disponible.
+        self.tipo_cambio = tipo_cambio_service
 
     def url_de_autorizacion(self, usuario_id: int, proveedor: ProveedorCorreo, estado: str) -> str:
         """Arma la URL a la que se manda al titular para que autorice el acceso."""
@@ -317,6 +338,8 @@ class CuentaCorreoService:
                         cuenta_correo_id=cuenta.id,
                         proveedor=cuenta.proveedor,
                         direccion=cuenta.direccion,
+                        tipo_cambio_venta=fila.tipo_cambio_venta,
+                        tipo_cambio_fecha=fila.tipo_cambio_fecha,
                     )
                 )
         return con_fuente
@@ -372,6 +395,10 @@ class CuentaCorreoService:
         )
         nuevos = [m for m in mensajes if m.identificador not in ya_guardados]
 
+        # Una sola consulta para todo el lote, y solo si hay algo que guardar:
+        # el tipo de cambio es el mismo para todos los que se guardan ahora.
+        tipo_de_cambio = self._tipo_de_cambio_de_hoy() if nuevos else None
+
         agregados = 0
         for mensaje in nuevos:
             try:
@@ -380,13 +407,40 @@ class CuentaCorreoService:
                 continue
             parseado = parsear_comprobante_bac(cuerpo)
             self.comprobantes.agregar(
-                _fila_desde_parseado(cuenta.id, mensaje.identificador, parseado)
+                _fila_desde_parseado(cuenta.id, mensaje.identificador, parseado, tipo_de_cambio)
             )
             agregados += 1
 
         cuenta.ultima_sincronizacion = datetime.now(UTC)
         self.cuentas.sesion.commit()
         return agregados
+
+    def _tipo_de_cambio_de_hoy(self) -> TipoDeCambio | None:
+        """El tipo de cambio para sellar los comprobantes que se van a guardar.
+
+        Que no haya -porque no se inyectó el servicio, o porque hoy no responde
+        ni el Banco Central ni Hacienda- no puede impedir guardar el
+        comprobante: el gasto es el dato importante, la tasa es un extra que
+        mejora la conversión posterior. Sin ella, esos comprobantes se
+        convierten con la tasa del día en que se consulten, como antes.
+        """
+        if self.tipo_cambio is None:
+            return None
+        try:
+            return self.tipo_cambio.obtener()
+        except Exception:
+            # Se atrapa todo a propósito, y solo acá. En el resto del sistema
+            # tragarse una excepción sin mirar el tipo esconde errores; en este
+            # punto concreto es lo correcto, porque el valor es opcional por
+            # diseño y la alternativa es perder el gasto -que sí es el dato
+            # importante- por un problema de un servicio de moneda.
+            #
+            # `ErrorDeProveedorExterno` solo no alcanza: un `httpx.ReadTimeout`
+            # de Hacienda se coló por acá y tumbó la sincronización con un 500.
+            # Eso ya se arregló en el origen (`TipoCambioService._pedir`), pero
+            # esta garantía no debería depender de que el otro servicio se
+            # porte bien.
+            return None
 
     def desvincular(self, usuario_id: int, cuenta_id: int) -> None:
         """Desvincula un buzón sin borrar la cuenta del titular.

@@ -21,7 +21,10 @@ from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
-from app.presentation.dependencies import obtener_servicio_de_cuentas_correo
+from app.presentation.dependencies import (
+    obtener_servicio_de_cuentas_correo,
+    obtener_servicio_de_tipo_cambio,
+)
 from tests.apoyos_correo import ProveedorDeCorreoFalso
 
 
@@ -77,6 +80,20 @@ def proveedor_correo_falso() -> ProveedorDeCorreoFalso:
     return ProveedorDeCorreoFalso()
 
 
+def _tipo_de_cambio_de_la_prueba():
+    """El servicio de tipo de cambio que la prueba haya sustituido, si sustituyó alguno.
+
+    Estos fixtures arman `CuentaCorreoService` a mano en vez de dejar que lo
+    resuelva la inyección de dependencias, así que un
+    `dependency_overrides[obtener_servicio_de_tipo_cambio]` puesto por la
+    prueba no llegaría solo hasta acá. Por defecto queda en `None`: la mayoría
+    de las pruebas no tienen nada que ver con monedas y no deberían necesitar
+    un doble para que la sincronización funcione.
+    """
+    fabrica = app.dependency_overrides.get(obtener_servicio_de_tipo_cambio)
+    return fabrica() if fabrica else None
+
+
 @pytest.fixture
 def cliente_con_correo_falso(
     cliente: TestClient, sesion: Session, proveedor_correo_falso: ProveedorDeCorreoFalso
@@ -96,6 +113,7 @@ def cliente_con_correo_falso(
                 ProveedorCorreo.GMAIL: proveedor_correo_falso,
             },
             ComprobanteRepository(sesion),
+            _tipo_de_cambio_de_la_prueba(),
         )
 
     app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio
@@ -124,6 +142,7 @@ def cliente_con_dos_buzones(cliente: TestClient, sesion: Session) -> Iterator[Te
                 ProveedorCorreo.GMAIL: ProveedorDeCorreoFalso(direccion="titular@gmail.com"),
             },
             ComprobanteRepository(sesion),
+            _tipo_de_cambio_de_la_prueba(),
         )
 
     app.dependency_overrides[obtener_servicio_de_cuentas_correo] = _armar_servicio

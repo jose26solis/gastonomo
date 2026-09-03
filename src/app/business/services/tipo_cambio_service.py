@@ -69,8 +69,12 @@ class TipoDeCambio:
 MONEDAS_CONVERTIBLES = ("CRC", "USD")
 
 
-def convertir(monto: Decimal, desde: str, hacia: str, tipo_de_cambio: TipoDeCambio) -> Decimal:
+def convertir(monto: Decimal, desde: str, hacia: str, venta: Decimal) -> Decimal:
     """Pasa un monto de una moneda a la otra, redondeado a dos decimales.
+
+    Recibe la tasa suelta y no un `TipoDeCambio` porque quien llama no siempre
+    tiene uno completo: un comprobante guarda solo la tasa de venta con la que
+    se selló, no el par compra/venta de ese día.
 
     Se usa el tipo de cambio de **venta** en las dos direcciones, no venta
     para una y compra para la otra. La razón es que esto convierte *gastos*:
@@ -85,7 +89,7 @@ def convertir(monto: Decimal, desde: str, hacia: str, tipo_de_cambio: TipoDeCamb
     """
     if desde == hacia or desde not in MONEDAS_CONVERTIBLES or hacia not in MONEDAS_CONVERTIBLES:
         return monto
-    convertido = monto * tipo_de_cambio.venta if hacia == "CRC" else monto / tipo_de_cambio.venta
+    convertido = monto * venta if hacia == "CRC" else monto / venta
     return convertido.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
@@ -160,6 +164,21 @@ class TipoCambioService:
             motivos.append(f"Hacienda: {error}")
         return None, motivos
 
+    def _pedir(self, url: str, params: dict | None = None) -> httpx.Response:
+        """Hace la petición traduciendo cualquier fallo de red a un error del dominio.
+
+        Sin esto, un timeout o un DNS caído salen como `httpx.ReadTimeout` -una
+        excepción de la librería HTTP, no del dominio- y se escapan de todos los
+        `except ErrorDeProveedorExterno` que la aplicación tiene puestos
+        justamente para tolerar que este servicio falle. El síntoma real fue una
+        sincronización de correo caída entera con un 500 porque Hacienda tardó
+        en responder, cuando el tipo de cambio ahí es solo un extra.
+        """
+        try:
+            return self._cliente.get(url, params=params)
+        except httpx.HTTPError as error:
+            raise ErrorDeProveedorExterno(f"no respondió ({type(error).__name__}).") from error
+
     def _del_banco_central(self, fecha: date) -> TipoDeCambio:
         """Consulta un rango de días y se queda con el valor más reciente.
 
@@ -181,7 +200,7 @@ class TipoCambioService:
         pidió: un lunes temprano puede seguir publicando el valor del viernes,
         y quien muestre el dato tiene que poder decir de qué día es.
         """
-        respuesta = self._cliente.get(_URL_HACIENDA)
+        respuesta = self._pedir(_URL_HACIENDA)
         if respuesta.status_code >= 400:
             raise ErrorDeProveedorExterno(
                 f"respondió HTTP {respuesta.status_code}: {respuesta.text[:200]}"
@@ -199,9 +218,9 @@ class TipoCambioService:
             ) from error
 
     def _ultimo_valor(self, indicador: int, desde: date, hasta: date) -> Decimal:
-        respuesta = self._cliente.get(
+        respuesta = self._pedir(
             _URL_SERVICIO,
-            params={
+            {
                 "Indicador": indicador,
                 "FechaInicio": desde.strftime("%d/%m/%Y"),
                 "FechaFinal": hasta.strftime("%d/%m/%Y"),

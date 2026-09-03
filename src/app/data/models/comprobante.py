@@ -14,10 +14,10 @@ ningún cuerpo de mensaje, porque no encuentra ningún `mensaje_id` nuevo con qu
 hacerlo.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.data.models.base import Base
@@ -63,6 +63,29 @@ class Comprobante(Base):
     moneda: Mapped[str | None] = mapped_column(String(3), nullable=True)
     monto: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     confianza: Mapped[float] = mapped_column(nullable=False)
+
+    # El tipo de cambio que regía cuando este comprobante se guardó, para poder
+    # convertirlo después sin depender de una consulta histórica.
+    #
+    # El Banco Central sí publica tipos de cambio históricos, pero solo con una
+    # suscripción, y su servicio lleva días caído -ni siquiera se puede sacar el
+    # token. El respaldo (Hacienda) únicamente publica el del día. Sin guardar
+    # nada, convertir una compra de hace tres meses obliga a usar la tasa de
+    # hoy, que no es la que pagó.
+    #
+    # Guardarlo al sincronizar no recupera el pasado -para los comprobantes que
+    # ya estaban, estas columnas quedan en NULL y se sigue cayendo a la tasa de
+    # hoy- pero deja de perderlo de aquí en adelante. Y como el comprobante
+    # normalmente se sincroniza el mismo día o al siguiente de la compra, la
+    # tasa guardada es en la práctica la de la compra.
+    #
+    # `tipo_cambio_fecha` es de qué día es la tasa, que no siempre coincide con
+    # `fecha`: al sincronizar una bandeja vieja por primera vez se guarda la
+    # tasa de hoy para compras de hace meses. Sin esta columna no habría forma
+    # de distinguir una tasa contemporánea de una tardía, y el total parecería
+    # más preciso de lo que es.
+    tipo_cambio_venta: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    tipo_cambio_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     def __repr__(self) -> str:
         return (

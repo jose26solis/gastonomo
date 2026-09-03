@@ -60,14 +60,23 @@ ProveedoresDeCorreoDependencia = Annotated[
 
 
 def obtener_servicio_de_cuentas_correo(
-    sesion: SesionDependencia, proveedores: ProveedoresDeCorreoDependencia
+    sesion: SesionDependencia,
+    proveedores: ProveedoresDeCorreoDependencia,
+    cliente: ClienteHttpDependencia,
 ) -> CuentaCorreoService:
-    """Arma el servicio de cuentas de correo con sus repositorios y proveedores."""
+    """Arma el servicio de cuentas de correo con sus repositorios y proveedores.
+
+    Recibe también el servicio de tipo de cambio, pero no para convertir nada:
+    lo usa para sellar cada comprobante nuevo con la tasa del día en que se
+    sincroniza, y así poder convertirlo después sin depender de una consulta
+    histórica al Banco Central.
+    """
     return CuentaCorreoService(
         CuentaCorreoRepository(sesion),
         UsuarioRepository(sesion),
         proveedores,
         ComprobanteRepository(sesion),
+        obtener_servicio_de_tipo_cambio(cliente),
     )
 
 

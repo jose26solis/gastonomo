@@ -246,6 +246,15 @@ export function Resumen({
       movimientosRecientes,
       tendencia,
       periodos,
+      // Cuántos del mes se convirtieron con la tasa de hoy en vez de con una
+      // guardada al sincronizarlos. Son los que ya estaban en la base antes de
+      // que se empezara a sellarlos, y el panel lo dice en vez de presentar
+      // todos los totales como igual de precisos.
+      convertidosConLaTasaDeHoy: resumen.conversion
+        ? comprobantesDelMesTodasLasMonedas.filter(
+            (c) => c.moneda_original && c.tipo_cambio_fecha === resumen.conversion!.fecha,
+          ).length
+        : 0,
       hayMovimientosEnUsd: comprobantesDelMesTodasLasMonedas.some((c) => c.moneda === "USD"),
       esMesActual: periodoActual.anio === periodos[0].anio && periodoActual.mes === periodos[0].mes,
     };
@@ -345,9 +354,15 @@ export function Resumen({
         </select>
         {resumen?.conversion && (
           <span style={{ fontSize: 10.5, color: "var(--color-text-dim)", flex: 1, minWidth: 220 }}>
-            Convertido a ₡{resumen.conversion.venta} por dólar, tipo de cambio de venta del{" "}
-            {resumen.conversion.fecha} (Banco Central). Los meses anteriores se convierten con esa
-            misma tasa, no con la de su fecha.
+            Cada movimiento se convierte con el tipo de cambio de venta que regía cuando se
+            registró (Banco Central).
+            {datos.convertidosConLaTasaDeHoy > 0 && (
+              <>
+                {" "}
+                {datos.convertidosConLaTasaDeHoy} de este mes son anteriores a que se empezara a
+                guardar la tasa, y usan la de hoy: ₡{resumen.conversion.venta}.
+              </>
+            )}
           </span>
         )}
       </div>

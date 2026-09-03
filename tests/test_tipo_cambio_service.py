@@ -22,7 +22,6 @@ import pytest
 from app.business.errors import ErrorDeProveedorExterno
 from app.business.services.tipo_cambio_service import (
     TipoCambioService,
-    TipoDeCambio,
     convertir,
 )
 from app.config.settings import Configuracion
@@ -268,7 +267,7 @@ def test_convertir_usa_la_venta_en_las_dos_direcciones() -> None:
     colones y de vuelta a dólares daría menos de 100 -una fuga silenciosa en
     cada conversión.
     """
-    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+    tasa = Decimal("451.72")
 
     en_colones = convertir(Decimal("100.00"), "USD", "CRC", tasa)
     de_vuelta = convertir(en_colones, "CRC", "USD", tasa)
@@ -278,20 +277,38 @@ def test_convertir_usa_la_venta_en_las_dos_direcciones() -> None:
 
 
 def test_convertir_a_la_misma_moneda_no_toca_el_monto() -> None:
-    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+    tasa = Decimal("451.72")
 
     assert convertir(Decimal("7600.00"), "CRC", "CRC", tasa) == Decimal("7600.00")
 
 
 def test_convertir_una_moneda_sin_tasa_la_deja_como_esta() -> None:
     """Inventar una tasa para el euro seria peor que no convertir."""
-    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+    tasa = Decimal("451.72")
 
     assert convertir(Decimal("50.00"), "EUR", "CRC", tasa) == Decimal("50.00")
 
 
 def test_convertir_redondea_a_dos_decimales() -> None:
-    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+    tasa = Decimal("451.72")
 
     assert convertir(Decimal("6.00"), "USD", "CRC", tasa) == Decimal("2710.32")
     assert convertir(Decimal("1000.00"), "CRC", "USD", tasa) == Decimal("2.21")
+
+
+def test_un_fallo_de_red_sale_como_error_del_dominio_y_no_como_httpx() -> None:
+    """Una excepción de httpx cruda se escaparía de todos los `except` de la app.
+
+    Es lo que pasó de verdad: Hacienda tardó en responder, el `ReadTimeout` se
+    coló hasta arriba y tumbó una sincronización de correo entera con un 500,
+    cuando el tipo de cambio en esa operación es apenas un extra.
+    """
+
+    def _timeout(peticion: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timeout", request=peticion)
+
+    cliente = httpx.Client(transport=httpx.MockTransport(_timeout))
+    servicio = TipoCambioService(cliente, _configuracion())
+
+    with pytest.raises(ErrorDeProveedorExterno):
+        servicio.obtener(date.today())

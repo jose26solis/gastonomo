@@ -74,6 +74,8 @@ export interface ComprobanteConFuente extends ComprobanteParseado {
   /** Lo que cobró el banco, si este movimiento se convirtió a otra moneda. */
   monto_original: string | null;
   moneda_original: string | null;
+  /** De qué día es la tasa con la que se convirtió este movimiento. */
+  tipo_cambio_fecha: string | null;
 }
 
 export interface ResumenFinancieroConFuente {

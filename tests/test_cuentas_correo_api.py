@@ -4,9 +4,12 @@ from datetime import date
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 from fastapi.testclient import TestClient
 
+from app.business.errors import ErrorDeProveedorExterno
 from app.business.services.tipo_cambio_service import TipoDeCambio
+from app.data.models.comprobante import Comprobante
 from app.data.models.enums import Moneda
 from app.data.models.usuario import Usuario
 from app.main import app
@@ -242,13 +245,17 @@ def test_el_resumen_combinado_sin_cuentas_vinculadas_no_falla(
 
 
 def _con_tipo_de_cambio(venta: str = "500.00"):
-    """Sustituye el servicio del tipo de cambio por uno fijo, sin red."""
+    """Una *fábrica* de servicio de tipo de cambio fijo, sin red.
+
+    Devuelve un callable y no la instancia porque `dependency_overrides` espera
+    algo que FastAPI pueda llamar para resolver la dependencia.
+    """
 
     class _Fijo:
         def obtener(self, fecha=None):
             return TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal(venta), venta=Decimal(venta))
 
-    return _Fijo()
+    return _Fijo
 
 
 def test_el_resumen_puede_pedirse_convertido_a_una_sola_moneda(
@@ -259,7 +266,7 @@ def test_el_resumen_puede_pedirse_convertido_a_una_sola_moneda(
     El comprobante del doble de prueba es de 7870.00 colones; a 500 por dólar
     son 15.74 dólares por buzón, 31.48 entre los dos.
     """
-    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio()
     try:
         estado = _codificar_estado(usuario.id)
         for proveedor in ("outlook", "gmail"):
@@ -305,3 +312,146 @@ def test_sin_el_parametro_moneda_no_se_convierte_nada(
     assert cuerpo["conversion"] is None
     assert cuerpo["comprobantes"][0]["moneda"] == "CRC"
     assert cuerpo["comprobantes"][0]["monto_original"] is None
+
+
+def test_al_sincronizar_se_guarda_el_tipo_de_cambio_del_dia(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario, sesion
+) -> None:
+    """Cada comprobante nuevo queda sellado con la tasa vigente al guardarlo.
+
+    Es lo que permite convertirlo después sin pedirle al Banco Central una
+    consulta histórica -que necesita suscripción y hoy ni siquiera responde.
+    """
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio("500.00")
+    try:
+        cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/outlook/callback",
+            params={"code": "c", "state": _codificar_estado(usuario.id)},
+        )
+        cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    fila = sesion.query(Comprobante).first()
+    assert fila.tipo_cambio_venta == Decimal("500.0000")
+    assert fila.tipo_cambio_fecha == date(2026, 9, 2)
+
+
+def test_se_convierte_con_la_tasa_guardada_y_no_con_la_de_hoy(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario, sesion
+) -> None:
+    """La tasa sellada gana sobre la del día de la consulta.
+
+    Sin esto, un gasto de hace meses se reexpresaría con la tasa de hoy cada
+    vez que se abre la pantalla, y el total del pasado cambiaría solo.
+    """
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio("500.00")
+    try:
+        cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/outlook/callback",
+            params={"code": "c", "state": _codificar_estado(usuario.id)},
+        )
+        cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    # Hoy la tasa es otra: 1000, el doble de la que se guardó.
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio("1000.00")
+    try:
+        cuerpo = cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero",
+            params={"usuario_id": usuario.id, "moneda": "USD"},
+        ).json()
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    # 7870.00 / 500 = 15.74, con la tasa guardada. Con la de hoy serian 7.87.
+    assert cuerpo["comprobantes"][0]["monto"] == "15.74"
+
+
+def test_sin_tasa_guardada_se_cae_a_la_de_hoy(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario, sesion
+) -> None:
+    """Los comprobantes viejos, guardados antes de sellar, siguen funcionando.
+
+    No se les inventa una tasa retroactiva: se convierten con la de hoy, igual
+    que antes de este cambio.
+    """
+    cliente_con_dos_buzones.get(
+        "/api/cuentas-correo/outlook/callback",
+        params={"code": "c", "state": _codificar_estado(usuario.id)},
+    )
+    cliente_con_dos_buzones.get(
+        "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+    )
+    # Se simula un comprobante de los de antes: sin tasa guardada.
+    fila = sesion.query(Comprobante).first()
+    fila.tipo_cambio_venta = None
+    fila.tipo_cambio_fecha = None
+    sesion.commit()
+
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio("1000.00")
+    try:
+        cuerpo = cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero",
+            params={"usuario_id": usuario.id, "moneda": "USD"},
+        ).json()
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    assert cuerpo["comprobantes"][0]["monto"] == "7.87", "7870.00 / 1000, la tasa de hoy"
+
+
+def test_si_no_hay_tipo_de_cambio_la_sincronizacion_no_falla(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario, sesion
+) -> None:
+    """Leer correo no puede depender de que el servicio de moneda responda."""
+
+    class _Caido:
+        def obtener(self, fecha=None):
+            raise ErrorDeProveedorExterno("ni el BCCR ni Hacienda respondieron")
+
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _Caido
+    try:
+        cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/outlook/callback",
+            params={"code": "c", "state": _codificar_estado(usuario.id)},
+        )
+        respuesta = cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    assert respuesta.status_code == 200
+    assert len(respuesta.json()["comprobantes"]) == 1, "el gasto se guarda igual"
+    assert sesion.query(Comprobante).first().tipo_cambio_venta is None
+
+
+def test_un_timeout_del_tipo_de_cambio_no_tumba_la_sincronizacion(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario, sesion
+) -> None:
+    """Regresión: un `httpx.ReadTimeout` daba 500 en vez de guardar sin tasa."""
+
+    class _ConTimeout:
+        def obtener(self, fecha=None):
+            raise httpx.ReadTimeout("read timeout")
+
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = lambda: _ConTimeout()
+    try:
+        cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/outlook/callback",
+            params={"code": "c", "state": _codificar_estado(usuario.id)},
+        )
+        respuesta = cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    assert respuesta.status_code == 200
+    assert len(respuesta.json()["comprobantes"]) == 1

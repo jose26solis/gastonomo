@@ -169,6 +169,10 @@ class ComprobanteConFuenteResponse(ComprobanteParseadoResponse):
     # estos dos dicen qué cobró el banco de verdad.
     monto_original: Decimal | None = None
     moneda_original: str | None = None
+    # De qué día es la tasa con la que se convirtió este movimiento. Puede no
+    # ser la de hoy -si se guardó al sincronizarlo- ni la de la compra -si se
+    # sincronizó tarde. Va explícito para que la pantalla no tenga que suponer.
+    tipo_cambio_fecha: date | None = None
 
 
 class ResumenFinancieroConFuenteResponse(BaseModel):
