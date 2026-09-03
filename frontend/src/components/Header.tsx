@@ -1,14 +1,17 @@
+import { SignOut } from "@phosphor-icons/react";
+import type { Usuario } from "../types";
+
 export function Header({
   kicker,
   titulo,
-  usuarioId,
-  onCambiarUsuarioId,
+  usuario,
+  onCerrarSesion,
   acciones,
 }: {
   kicker: string;
   titulo: string;
-  usuarioId: number;
-  onCambiarUsuarioId: (id: number) => void;
+  usuario: Usuario;
+  onCerrarSesion: () => void;
   acciones?: React.ReactNode;
 }) {
   return (
@@ -30,32 +33,43 @@ export function Header({
         <h1 className="screen-title">{titulo}</h1>
       </div>
 
-      <label
+      <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          fontSize: 11,
+          gap: 10,
+          fontSize: 11.5,
           color: "var(--color-text-dim)",
         }}
       >
-        usuario_id
-        <input
-          type="number"
-          min={1}
-          value={usuarioId}
-          onChange={(evento) => onCambiarUsuarioId(Number(evento.target.value) || 1)}
+        <span
           style={{
-            width: 56,
-            padding: "5px 8px",
-            background: "var(--color-surface)",
+            maxWidth: 200,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={usuario.correo}
+        >
+          {usuario.nombre_completo}
+        </span>
+        <button
+          onClick={onCerrarSesion}
+          title="Cerrar sesión"
+          style={{
+            background: "transparent",
             border: "1px solid var(--color-border)",
             borderRadius: 6,
-            color: "var(--color-text)",
-            fontSize: 11.5,
+            color: "var(--color-text-dim)",
+            cursor: "pointer",
+            display: "grid",
+            placeItems: "center",
+            padding: 6,
           }}
-        />
-      </label>
+        >
+          <SignOut size={13} />
+        </button>
+      </div>
 
       {acciones}
     </header>

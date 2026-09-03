@@ -7,7 +7,12 @@ servicio y traduce el resultado de vuelta a JSON.
 from fastapi import APIRouter, Query, status
 
 from app.business.services.categoria_service import CrearCategoriaComando
-from app.presentation.dependencies import ServicioDeCategorias
+from app.presentation.dependencies import (
+    ServicioDeCategorias,
+    UsuarioActualDependencia,
+    VerificarTitular,
+    verificar_mismo_usuario,
+)
 from app.presentation.schemas import CategoriaResponse, CrearCategoriaRequest
 
 router = APIRouter(prefix="/api/categorias", tags=["categorias"])
@@ -20,9 +25,12 @@ router = APIRouter(prefix="/api/categorias", tags=["categorias"])
     summary="Crear una categoria",
 )
 def crear_categoria(
-    peticion: CrearCategoriaRequest, servicio: ServicioDeCategorias
+    peticion: CrearCategoriaRequest,
+    servicio: ServicioDeCategorias,
+    usuario_actual: UsuarioActualDependencia,
 ) -> CategoriaResponse:
     """Crea una categoria aplicando las reglas del dominio."""
+    verificar_mismo_usuario(usuario_actual, peticion.usuario_id)
     comando = CrearCategoriaComando(
         usuario_id=peticion.usuario_id,
         nombre=peticion.nombre,
@@ -41,6 +49,7 @@ def crear_categoria(
 )
 def listar_categorias(
     servicio: ServicioDeCategorias,
+    _: VerificarTitular,
     usuario_id: int = Query(
         gt=0, le=2_147_483_647, description="Titular cuyas categorias se listan"
     ),

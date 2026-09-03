@@ -8,9 +8,11 @@ tocan la base directamente.
 from typing import Annotated
 
 import httpx
-from fastapi import Depends
+from fastapi import Depends, Header, Query
 from sqlalchemy.orm import Session
 
+from app.business.errors import AccesoDenegado, CredencialesInvalidas
+from app.business.services.auth_service import AuthService
 from app.business.services.categoria_service import CategoriaService
 from app.business.services.comercio_service import ComercioService
 from app.business.services.correo.gmail import GmailProveedor
@@ -23,6 +25,7 @@ from app.config.cliente_http import obtener_cliente_http
 from app.config.database import obtener_sesion
 from app.config.settings import obtener_configuracion
 from app.data.models.enums import ProveedorCorreo
+from app.data.models.usuario import Usuario
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
 from app.data.repositories.comercio_repository import ComercioRepository
@@ -125,3 +128,67 @@ def obtener_servicio_de_tipo_cambio(cliente: ClienteHttpDependencia) -> TipoCamb
 
 
 ServicioDeTipoCambio = Annotated[TipoCambioService, Depends(obtener_servicio_de_tipo_cambio)]
+
+
+def obtener_servicio_de_auth(sesion: SesionDependencia) -> AuthService:
+    """Arma el servicio de autenticación sobre la sesion actual."""
+    return AuthService(UsuarioRepository(sesion))
+
+
+ServicioDeAuth = Annotated[AuthService, Depends(obtener_servicio_de_auth)]
+
+
+def obtener_usuario_actual(
+    servicio: ServicioDeAuth,
+    autorizacion: Annotated[str | None, Header(alias="Authorization")] = None,
+) -> Usuario:
+    """Resuelve el titular autenticado a partir del encabezado `Authorization: Bearer <token>`.
+
+    Es la base de todo lo demás en este archivo relacionado con permisos: un
+    endpoint que dependa de esto exige sesión iniciada, y uno que además use
+    `VerificarTitular` exige que esa sesión sea la del `usuario_id` que se le
+    está pidiendo.
+    """
+    if autorizacion is None or not autorizacion.startswith("Bearer "):
+        raise CredencialesInvalidas("Falta iniciar sesión.")
+    return servicio.usuario_de_token(autorizacion.removeprefix("Bearer "))
+
+
+UsuarioActualDependencia = Annotated[Usuario, Depends(obtener_usuario_actual)]
+
+
+def verificar_titular(
+    usuario_actual: UsuarioActualDependencia,
+    # Las mismas cotas que cada endpoint ya declara en su propio
+    # `usuario_id: int = Query(gt=0, le=2_147_483_647)` -no alcanza con que
+    # una de las dos declaraciones las tenga: FastAPI valida cada una contra
+    # el valor crudo por separado, y esta corre antes de que la del endpoint
+    # tenga oportunidad. Sin las mismas cotas acá, un id fuera de rango
+    # pasaba esta validación (sin bordes) y llegaba al cuerpo de la función,
+    # que lo comparaba contra `usuario_actual.id` y siempre daba 403 -un id
+    # mal formado terminaba pareciendo "no sos el dueño" en vez de "esto no
+    # es un id válido".
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+) -> None:
+    """Confirma que el titular autenticado es el mismo `usuario_id` que la petición pide.
+
+    La API siempre recibió `usuario_id` explícito en la URL -eso no cambia
+    acá- pero antes de esto nada impedía pedir los datos de cualquier otro
+    con solo cambiar el número: no había forma de estar "autenticado como"
+    nadie.
+    """
+    if usuario_actual.id != usuario_id:
+        raise AccesoDenegado("No podés acceder a los datos de otro titular.")
+
+
+VerificarTitular = Annotated[None, Depends(verificar_titular)]
+
+
+def verificar_mismo_usuario(usuario_actual: Usuario, usuario_id_declarado: int) -> None:
+    """Lo mismo que `verificar_titular`, para los pocos endpoints donde `usuario_id`
+    viaja en el cuerpo del pedido en vez de en la URL -ahí no hay un parámetro
+    de query que compartir, así que se llama explícitamente con el valor ya
+    parseado del cuerpo.
+    """
+    if usuario_actual.id != usuario_id_declarado:
+        raise AccesoDenegado("No podés acceder a los datos de otro titular.")

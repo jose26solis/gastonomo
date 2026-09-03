@@ -1,5 +1,7 @@
 import { AppShell } from "./components/AppShell";
+import { useSesion } from "./lib/useSesion";
 import { CallbackVinculacion } from "./pages/CallbackVinculacion";
+import { Login } from "./pages/Login";
 
 /**
  * Enrutamiento manual por `pathname`.
@@ -11,6 +13,7 @@ import { CallbackVinculacion } from "./pages/CallbackVinculacion";
  */
 export function App() {
   const { pathname } = window.location;
+  const { usuario, cargando, registrar, iniciarSesion, cerrarSesion } = useSesion();
 
   if (pathname === "/vincular/outlook/callback") {
     return <CallbackVinculacion proveedor="OUTLOOK" />;
@@ -18,5 +21,12 @@ export function App() {
   if (pathname === "/vincular/gmail/callback") {
     return <CallbackVinculacion proveedor="GMAIL" />;
   }
-  return <AppShell />;
+
+  if (cargando) {
+    return null;
+  }
+  if (!usuario) {
+    return <Login onRegistrar={registrar} onIniciarSesion={iniciarSesion} />;
+  }
+  return <AppShell usuario={usuario} onCerrarSesion={cerrarSesion} />;
 }

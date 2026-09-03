@@ -344,6 +344,9 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | Método | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/api/salud` | Confirma que el sistema está en línea |
+| `POST` | `/api/auth/registro` | Crea la cuenta y devuelve una sesión ya iniciada (token + usuario) |
+| `POST` | `/api/auth/iniciar-sesion` | Verifica correo y contraseña, devuelve una sesión nueva |
+| `GET` | `/api/auth/yo` | Confirma un token guardado y trae los datos del titular dueño |
 | `POST` | `/api/categorias` | Crea una categoría aplicando las reglas del dominio |
 | `GET` | `/api/categorias?usuario_id=1` | Lista las categorías activas de un usuario |
 | `GET` | `/api/cuentas-correo/outlook/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Outlook |
@@ -369,12 +372,14 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `DELETE` | `/api/presupuestos/{id}?usuario_id=1` | Elimina un presupuesto |
 | `GET` | `/api/tipo-cambio?fecha=2026-09-02` | Tipo de cambio de referencia del colón contra el dólar (BCCR) |
 
-Los tres primeros no necesitan nada extra. Todo lo que lee correo bajo `/api/cuentas-correo/…`
-necesita al menos un buzón ya vinculado con credenciales reales de Microsoft/Google — ver la
-sección **Vinculación de correo** más abajo. Las rutas con `{id}` operan sobre **un** buzón
-puntual; las que no lo llevan combinan todos los buzones activos del titular, que es lo que usa el
-frontend. `/api/tipo-cambio` necesita la suscripción del Banco Central —
-ver [Conversión de moneda](#conversión-de-moneda-banco-central-de-costa-rica) más arriba.
+`/api/salud` y los tres de `/api/auth` no necesitan sesión. **Todo lo demás sí**: hace falta el
+encabezado `Authorization: Bearer <token>` de una sesión iniciada como el mismo `usuario_id` que se
+le pide -ver [Registro y varios usuarios](#registro-y-varios-usuarios) más arriba. Todo lo que lee
+correo bajo `/api/cuentas-correo/…` además necesita al menos un buzón ya vinculado con credenciales
+reales de Microsoft/Google — ver la sección **Vinculación de correo** más abajo. Las rutas con
+`{id}` operan sobre **un** buzón puntual; las que no lo llevan combinan todos los buzones activos
+del titular, que es lo que usa el frontend. `/api/tipo-cambio` necesita la suscripción del Banco
+Central — ver [Conversión de moneda](#conversión-de-moneda-banco-central-de-costa-rica) más arriba.
 
 ### 5. Correr las pruebas y el linter
 
@@ -435,6 +440,37 @@ Tres decisiones sostienen la separación, ya que Python no la impone por sí sol
    único que sabe si la operación de negocio completa terminó bien.
 3. Los errores de negocio son **excepciones propias** sin ninguna referencia a HTTP; `main.py` es
    el único archivo que las traduce a códigos de respuesta.
+
+---
+
+## Registro y varios usuarios
+
+Cualquier persona crea su cuenta desde la pantalla de login (correo, contraseña, nombre) y ve
+únicamente lo suyo -sus categorías, sus buzones vinculados, sus comprobantes. Antes de esto el
+`usuario_id` se elegía a mano en un campo de texto del encabezado -sin ninguna autenticación detrás,
+cualquiera podía ver los datos de cualquier otro con solo cambiar el número.
+
+**Cómo funciona el login**, sin tabla de sesiones ni JWT: `POST /api/auth/registro` o
+`/api/auth/iniciar-sesion` devuelven un token que es, literalmente, el `usuario_id` cifrado con
+[Fernet](https://cryptography.io/en/latest/fernet/) -el mismo mecanismo simétrico que ya cifra los
+tokens de Outlook/Gmail y el `state` del handshake de OAuth2 (ver más abajo), reutilizado en vez de
+sumar una librería de JWT. El frontend lo guarda en `localStorage` y lo manda como
+`Authorization: Bearer <token>` en cada pedido
+([`api.ts`](frontend/src/api.ts)); el backend lo descifra, confirma que no venció (30 días de vida)
+y ya sabe quién pregunta -no hace falta ninguna tabla de sesiones que limpiar, y "cerrar sesión" es,
+del todo, que el cliente se olvide del token.
+
+**El resto de la API sigue recibiendo `usuario_id` explícito** -no cambió el contrato- pero ahora
+cada endpoint exige que la sesión activa sea la de ese mismo titular
+([`verificar_titular`/`verificar_mismo_usuario`](src/app/presentation/dependencies.py)): pedir los
+datos de otro id da `403`, no los datos de otro id. Las contraseñas se guardan con
+[bcrypt](https://pypi.org/project/bcrypt/), nunca en claro.
+
+> **Cuenta de prueba:** una base recién creada siembra `demo@gastonomo.cr` / `demo1234`
+> ([`sembrar_usuario_de_demostracion`](src/app/config/database.py)) para poder probar la API sin
+> pasar por el registro. En una base que ya tenía usuarios de antes de que este login existiera -la
+> de este mismo repositorio en desarrollo, por ejemplo- esa contraseña se puso a mano una sola vez
+> con `hashear_contrasena("demo1234")`; no hay una migración de datos que la reponga sola.
 
 ---
 
@@ -603,8 +639,10 @@ Pendiente:
 - [ ] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
-- [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
-- [ ] Pruebas automatizadas de frontend (el backend tiene 179 pruebas; el frontend, ninguna todavía)
+- [x] Registro e inicio de sesión reales -ver [Registro y varios usuarios](#registro-y-varios-usuarios) más abajo
+- [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
+- [ ] Recuperar u olvidar la contraseña, y un endpoint para cambiarla ya logueado
+- [ ] Pruebas automatizadas de frontend (el backend tiene 205 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta

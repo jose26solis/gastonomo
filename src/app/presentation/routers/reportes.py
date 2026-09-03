@@ -11,7 +11,7 @@ import csv
 import io
 from decimal import Decimal
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
@@ -25,9 +25,19 @@ from app.business.errors import ReglaDeNegocioViolada
 from app.business.services.comercio_service import ComercioClasificado, MovimientoDetallado
 from app.business.services.resumen_service import entrada_preferida_del_periodo
 from app.data.models.enums import EstadoCuentaCorreo
-from app.presentation.dependencies import ServicioDeComercios, ServicioDeCuentasCorreo
+from app.presentation.dependencies import (
+    ServicioDeComercios,
+    ServicioDeCuentasCorreo,
+    verificar_titular,
+)
 
-router = APIRouter(prefix="/api/cuentas-correo", tags=["reportes"])
+# Los seis endpoints de este router reciben `usuario_id` por query string y
+# ninguno otro -a diferencia de `cuentas_correo.py`, que además tiene los
+# callbacks de OAuth2 sin `usuario_id`- así que la protección se aplica una
+# sola vez acá, a nivel de router, en vez de repetirla en cada endpoint.
+router = APIRouter(
+    prefix="/api/cuentas-correo", tags=["reportes"], dependencies=[Depends(verificar_titular)]
+)
 
 _MESES_ES = (
     "enero", "febrero", "marzo", "abril", "mayo", "junio",

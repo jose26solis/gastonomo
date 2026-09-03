@@ -17,8 +17,10 @@ import type {
   MensajeResumido,
   Presupuesto,
   Proveedor,
+  Sesion,
   ResumenFinancieroConFuente,
   TipoDeCambio,
+  Usuario,
 } from "./types";
 
 const URL_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -33,8 +35,25 @@ export class ErrorDeApiError extends Error {
   }
 }
 
+// El token de sesión vive acá, en memoria, no en cada llamada individual:
+// así ningún componente tiene que acordarse de pasarlo. `useSesion` es el
+// único que lo cambia -al iniciar sesión, registrarse, cerrar sesión o
+// hidratar lo que había en localStorage al cargar la página.
+let tokenDeSesion: string | null = null;
+
+export function establecerTokenDeSesion(token: string | null): void {
+  tokenDeSesion = token;
+}
+
+function encabezadosDeAutorizacion(): HeadersInit {
+  return tokenDeSesion ? { Authorization: `Bearer ${tokenDeSesion}` } : {};
+}
+
 async function peticion<T>(ruta: string, init?: RequestInit): Promise<T> {
-  const respuesta = await fetch(`${URL_BASE}${ruta}`, init);
+  const respuesta = await fetch(`${URL_BASE}${ruta}`, {
+    ...init,
+    headers: { ...encabezadosDeAutorizacion(), ...init?.headers },
+  });
   if (!respuesta.ok) {
     const cuerpo = (await respuesta.json().catch(() => null)) as ErrorDeApi | null;
     throw new ErrorDeApiError(
@@ -50,7 +69,7 @@ async function peticion<T>(ruta: string, init?: RequestInit): Promise<T> {
 
 /** Descarga un archivo que el backend arma al vuelo (CSV/Excel/PDF), disparando el guardado del navegador. */
 async function descargarArchivo(ruta: string, nombreSugerido: string): Promise<void> {
-  const respuesta = await fetch(`${URL_BASE}${ruta}`);
+  const respuesta = await fetch(`${URL_BASE}${ruta}`, { headers: encabezadosDeAutorizacion() });
   if (!respuesta.ok) {
     const cuerpo = (await respuesta.json().catch(() => null)) as ErrorDeApi | null;
     throw new ErrorDeApiError(
@@ -75,6 +94,35 @@ const rutaProveedor: Record<Proveedor, string> = {
 };
 
 export const api = {
+  // ---- Autenticación ----
+
+  registrar(nombreCompleto: string, correo: string, contrasena: string): Promise<Sesion> {
+    return peticion("/api/auth/registro", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nombre_completo: nombreCompleto,
+        correo,
+        contrasena,
+      }),
+    });
+  },
+
+  iniciarSesion(correo: string, contrasena: string): Promise<Sesion> {
+    return peticion("/api/auth/iniciar-sesion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ correo, contrasena }),
+    });
+  },
+
+  /** Confirma que un token guardado sigue vigente y trae al titular dueño. */
+  yo(): Promise<Usuario> {
+    return peticion("/api/auth/yo");
+  },
+
+  // ---- Cuentas de correo ----
+
   /** Pide la URL de autorización del proveedor para redirigir al titular. */
   iniciarVinculacion(usuarioId: number, proveedor: Proveedor): Promise<IniciarVinculacionResponse> {
     return peticion(

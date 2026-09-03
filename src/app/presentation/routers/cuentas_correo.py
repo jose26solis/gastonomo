@@ -38,6 +38,7 @@ from app.presentation.dependencies import (
     ServicioDeCuentasCorreo,
     ServicioDePresupuestos,
     ServicioDeTipoCambio,
+    VerificarTitular,
 )
 from app.presentation.schemas import (
     ComercioClasificadoResponse,
@@ -57,16 +58,26 @@ from app.presentation.schemas import (
 router = APIRouter(prefix="/api/cuentas-correo", tags=["cuentas-correo"])
 
 
-def _codificar_estado(usuario_id: int) -> str:
-    return cifrar(json.dumps({"usuario_id": usuario_id}))
-
-
 _TTL_ESTADO_SEGUNDOS = 600  # 10 minutos: de sobra para completar el handshake, poco para reusar
+
+# El `state` de OAuth2 y el token de sesión (`auth_service.py`) se cifran con
+# la misma clave simétrica y tienen la misma forma superficial -un JSON con
+# `usuario_id`. Sin este campo, un `state` interceptado durante el
+# handshake -viaja por la URL, visible en el historial del navegador y en
+# los logs del proveedor- serviría como token de sesión válido por sus 10
+# minutos de vida, y viceversa. Ver la nota equivalente en `auth_service.py`.
+_PROPOSITO_ESTADO = "vincular-correo"
+
+
+def _codificar_estado(usuario_id: int) -> str:
+    return cifrar(json.dumps({"usuario_id": usuario_id, "proposito": _PROPOSITO_ESTADO}))
 
 
 def _decodificar_estado(estado: str) -> int:
     try:
         datos = json.loads(descifrar(estado, ttl_segundos=_TTL_ESTADO_SEGUNDOS))
+        if datos.get("proposito") != _PROPOSITO_ESTADO:
+            raise ValueError("no es un token de vinculación")
         return int(datos["usuario_id"])
     except (TokenIlegible, ValueError, KeyError, TypeError) as error:
         raise DatosInvalidos("El parametro state no es valido o expiro.") from error
@@ -79,6 +90,7 @@ def _decodificar_estado(estado: str) -> int:
 )
 def iniciar_outlook(
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> IniciarVinculacionResponse:
     """Devuelve la URL de Microsoft a la que el frontend debe redirigir al titular."""
@@ -111,6 +123,7 @@ def callback_outlook(
 )
 def iniciar_gmail(
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> IniciarVinculacionResponse:
     """Devuelve la URL de Google a la que el frontend debe redirigir al titular."""
@@ -139,6 +152,7 @@ def callback_gmail(
 @router.get("", response_model=list[CuentaCorreoResponse], summary="Listar los buzones vinculados")
 def listar_cuentas(
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> list[CuentaCorreoResponse]:
     """Lista los buzones vinculados del titular indicado."""
@@ -166,6 +180,7 @@ def _response_desde_con_fuente(item: ComprobanteConFuente) -> ComprobanteConFuen
 def resumen_financiero_de_usuario(
     servicio: ServicioDeCuentasCorreo,
     servicio_tipo_cambio: ServicioDeTipoCambio,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
     moneda: Annotated[
@@ -209,6 +224,7 @@ def resumen_financiero_de_usuario(
 def comercios_clasificados_de_usuario(
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> list[ComercioClasificadoResponse]:
@@ -229,6 +245,7 @@ def presupuestos_del_periodo_de_usuario(
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
     servicio_presupuestos: ServicioDePresupuestos,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     anio: int = Query(ge=2000, le=2100),
     mes: int = Query(ge=1, le=12),
@@ -252,6 +269,7 @@ def presupuestos_del_periodo_de_usuario(
 def probar_conexion(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=5, gt=0, le=25),
 ) -> list[MensajeResumidoResponse]:
@@ -271,6 +289,7 @@ def probar_conexion(
 def leer_comprobante(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     mensaje_id: str = Query(min_length=1, description="Id de mensaje que devolvió /probar"),
 ) -> ComprobanteParseadoResponse:
@@ -292,6 +311,7 @@ def leer_comprobante(
 def resumen_financiero(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> ResumenFinancieroResponse:
@@ -314,6 +334,7 @@ def resumen_financiero(
 def sincronizar(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> ResultadoDeSincronizacionResponse:
@@ -337,6 +358,7 @@ def comercios_clasificados(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
 ) -> list[ComercioClasificadoResponse]:
@@ -360,6 +382,7 @@ def presupuestos_del_periodo(
     servicio: ServicioDeCuentasCorreo,
     servicio_comercios: ServicioDeComercios,
     servicio_presupuestos: ServicioDePresupuestos,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     anio: int = Query(ge=2000, le=2100),
     mes: int = Query(ge=1, le=12),
@@ -383,6 +406,7 @@ def presupuestos_del_periodo(
 def desvincular_cuenta(
     cuenta_id: int,
     servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> None:
     """Desvincula el buzón y borra sus tokens. La fila se conserva como historial."""

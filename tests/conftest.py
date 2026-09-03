@@ -12,10 +12,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.business.services.auth_service import (
+    AuthService,
+    IniciarSesionComando,
+    RegistrarUsuarioComando,
+)
 from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.config.database import obtener_sesion
 from app.data.models.base import Base
-from app.data.models.enums import Moneda, ProveedorCorreo
+from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
@@ -26,6 +31,11 @@ from app.presentation.dependencies import (
     obtener_servicio_de_tipo_cambio,
 )
 from tests.apoyos_correo import ProveedorDeCorreoFalso
+
+# Contraseña del usuario de la fixture `usuario`. Vive acá -no en `usuario`
+# mismo, que solo expone el modelo ya creado- porque `cliente` la necesita
+# para iniciar sesión y conseguir un token real sin duplicar el registro.
+CONTRASENA_DE_PRUEBA = "contrasena-de-prueba"
 
 
 @pytest.fixture
@@ -49,28 +59,44 @@ def sesion() -> Iterator[Session]:
 
 @pytest.fixture
 def usuario(sesion: Session) -> Usuario:
-    """Titular dueno de los datos de la prueba."""
-    titular = Usuario(
-        nombre_completo="Titular de prueba",
-        correo="titular@gastonomo.cr",
-        contrasena_hash="hash-de-prueba",
-        moneda_preferida=Moneda.CRC,
+    """Titular dueno de los datos de la prueba.
+
+    Se crea vía `AuthService.registrar` -la misma ruta que un titular real- en
+    vez de insertar la fila a mano: así el hash de la contraseña es uno de
+    verdad, y `cliente` puede iniciar sesión con `CONTRASENA_DE_PRUEBA` para
+    conseguir un token real sin duplicar cómo se arma uno.
+    """
+    resultado = AuthService(UsuarioRepository(sesion)).registrar(
+        RegistrarUsuarioComando(
+            nombre_completo="Titular de prueba",
+            correo="titular@gastonomo.cr",
+            contrasena=CONTRASENA_DE_PRUEBA,
+        )
     )
-    sesion.add(titular)
-    sesion.commit()
-    return titular
+    return resultado.usuario
 
 
 @pytest.fixture
-def cliente(sesion: Session) -> Iterator[TestClient]:
+def cliente(sesion: Session, usuario: Usuario) -> Iterator[TestClient]:
     """Cliente HTTP contra la app real, con la base de la prueba inyectada.
+
+    Ya autenticado como `usuario` por defecto -es la inmensa mayoría de los
+    casos: una prueba que llama un endpoint protegido casi siempre quiere
+    probarlo "como este titular", no la falta de sesión. Una prueba que sí
+    necesita otra cosa (otro titular, sin token, un token vencido) puede
+    pisar el encabezado `Authorization` en la llamada puntual.
 
     El cliente se usa sin `with` a proposito: asi no se dispara el ciclo de vida
     de la aplicacion, que crearia el archivo SQLite de desarrollo. Las tablas de
     la prueba ya las creo la fixture `sesion`, en memoria.
     """
     app.dependency_overrides[obtener_sesion] = lambda: sesion
-    yield TestClient(app)
+    sesion_de_auth = AuthService(UsuarioRepository(sesion)).iniciar_sesion(
+        IniciarSesionComando(correo=usuario.correo, contrasena=CONTRASENA_DE_PRUEBA)
+    )
+    cliente_de_prueba = TestClient(app)
+    cliente_de_prueba.headers["Authorization"] = f"Bearer {sesion_de_auth.token}"
+    yield cliente_de_prueba
     app.dependency_overrides.clear()
 
 

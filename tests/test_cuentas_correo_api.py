@@ -179,9 +179,16 @@ def test_desvincular_devuelve_204_y_ya_no_aparece_en_el_listado(
     assert listado[0]["estado"] == "DESVINCULADA"
 
 
-def test_probar_conexion_de_una_cuenta_de_otro_titular_da_404(
+def test_probar_conexion_de_una_cuenta_de_otro_titular_da_403(
     cliente_con_correo_falso: TestClient, usuario: Usuario, sesion
 ) -> None:
+    """`cliente_con_correo_falso` está autenticado como `usuario`; pedir `/probar` con
+    el `usuario_id` de otro titular se rechaza en la capa de autenticación, antes de
+    que el servicio llegue a mirar si esa cuenta es de ese otro titular. (Ese caso -ya
+    autenticado como el titular correcto, pidiendo una cuenta que no es suya- sigue
+    cubierto a nivel de servicio en
+    test_cuenta_correo_service.py::test_no_deja_ver_una_cuenta_de_otro_titular.)
+    """
     otro = Usuario(
         nombre_completo="Otra persona",
         correo="otra-persona-api@gastonomo.cr",
@@ -200,7 +207,7 @@ def test_probar_conexion_de_una_cuenta_de_otro_titular_da_404(
         f"/api/cuentas-correo/{vinculada['id']}/probar", params={"usuario_id": otro.id}
     )
 
-    assert respuesta.status_code == 404
+    assert respuesta.status_code == 403
 
 
 def test_el_resumen_combinado_trae_las_dos_cuentas_marcadas_con_su_origen(

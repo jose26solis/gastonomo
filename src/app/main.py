@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DataError
 
 from app.business.errors import (
+    AccesoDenegado,
+    CredencialesInvalidas,
     DatosInvalidos,
     ErrorDeProveedorExterno,
     RecursoNoEncontrado,
@@ -22,6 +24,7 @@ from app.config.cliente_http import cerrar_cliente_http
 from app.config.database import crear_tablas, sembrar_usuario_de_demostracion
 from app.config.settings import obtener_configuracion
 from app.presentation.routers import (
+    auth,
     categorias,
     comercios,
     cuentas_correo,
@@ -58,12 +61,25 @@ app.add_middleware(
 )
 
 app.include_router(salud.router)
+app.include_router(auth.router)
 app.include_router(categorias.router)
 app.include_router(cuentas_correo.router)
 app.include_router(comercios.router)
 app.include_router(presupuestos.router)
 app.include_router(reportes.router)
 app.include_router(tipo_cambio.router)
+
+
+@app.exception_handler(CredencialesInvalidas)
+async def manejar_credenciales_invalidas(_: Request, error: CredencialesInvalidas) -> JSONResponse:
+    """401: falta iniciar sesión, o el correo/contraseña/token no sirven."""
+    return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={"detalle": str(error)})
+
+
+@app.exception_handler(AccesoDenegado)
+async def manejar_acceso_denegado(_: Request, error: AccesoDenegado) -> JSONResponse:
+    """403: hay sesión válida, pero no es dueña del recurso que pidió."""
+    return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detalle": str(error)})
 
 
 @app.exception_handler(DatosInvalidos)

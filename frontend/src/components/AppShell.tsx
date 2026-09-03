@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useUsuarioId } from "../lib/useUsuarioId";
+import type { Usuario } from "../types";
 import { Ajustes } from "../pages/Ajustes";
 import { Bancos } from "../pages/Bancos";
 import { Categorias } from "../pages/Categorias";
@@ -27,9 +27,15 @@ const TITULOS: Record<Pantalla, [string, string]> = {
  * necesite apuntar aquí dentro (a diferencia de los callbacks de OAuth, que
  * sí son rutas reales en `App.tsx`).
  */
-export function AppShell() {
+export function AppShell({
+  usuario,
+  onCerrarSesion,
+}: {
+  usuario: Usuario;
+  onCerrarSesion: () => void;
+}) {
   const [pantalla, setPantalla] = useState<Pantalla>("resumen");
-  const [usuarioId, cambiarUsuarioId] = useUsuarioId();
+  const usuarioId = usuario.id;
   const [sincronizando, setSincronizando] = useState(false);
   const [lineaEstado, setLineaEstado] = useState("Sin buzones vinculados todavía");
 
@@ -44,12 +50,7 @@ export function AppShell() {
         sincronizando={sincronizando}
       />
       <div className="app-main">
-        <Header
-          kicker={kicker}
-          titulo={titulo}
-          usuarioId={usuarioId}
-          onCambiarUsuarioId={cambiarUsuarioId}
-        />
+        <Header kicker={kicker} titulo={titulo} usuario={usuario} onCerrarSesion={onCerrarSesion} />
         <div className="app-content">
           {pantalla === "resumen" && (
             <Resumen

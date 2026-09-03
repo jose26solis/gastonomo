@@ -137,6 +137,18 @@ export interface ErrorDeApi {
   detalle: string;
 }
 
+export interface Usuario {
+  id: number;
+  nombre_completo: string;
+  correo: string;
+  moneda_preferida: string;
+}
+
+export interface Sesion {
+  token: string;
+  usuario: Usuario;
+}
+
 export interface TipoDeCambio {
   fecha: string;
   compra: string;

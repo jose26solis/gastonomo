@@ -40,13 +40,19 @@ def test_color_invalido_se_traduce_a_422(cliente: TestClient, usuario: Usuario) 
     assert "hexadecimal" in respuesta.json()["detalle"]
 
 
-def test_usuario_inexistente_se_traduce_a_404(cliente: TestClient) -> None:
+def test_crear_categoria_para_otro_usuario_se_traduce_a_403(cliente: TestClient) -> None:
+    """`cliente` está autenticado como `usuario`; pedir crear para otro id se rechaza
+    antes de tocar el servicio -ya no hace falta que ese otro id exista siquiera para
+    que la petición se rechace. (El caso "usuario 9999 no existe" en sí, cuando SÍ es
+    el propio titular autenticado, queda cubierto a nivel de servicio en
+    `test_categoria_service.py::test_rechaza_un_usuario_que_no_existe`.)
+    """
     respuesta = cliente.post(
         "/api/categorias",
         json={"usuario_id": 9999, "nombre": "Alimentacion", "color_hex": "#2563EB"},
     )
 
-    assert respuesta.status_code == 404
+    assert respuesta.status_code == 403
 
 
 def test_usuario_id_mas_alla_de_lo_que_soporta_la_columna_da_422(cliente: TestClient) -> None:

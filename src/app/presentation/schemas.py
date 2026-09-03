@@ -28,6 +28,44 @@ class SaludResponse(BaseModel):
     version: str
 
 
+class RegistrarUsuarioRequest(BaseModel):
+    """Cuerpo de POST /api/auth/registro."""
+
+    nombre_completo: str = Field(min_length=1, max_length=120)
+    correo: str = Field(min_length=3, max_length=180)
+    # El mínimo real (8 caracteres) lo aplica AuthService, no acá: es una
+    # regla de negocio -puede cambiar sin tocar el contrato HTTP- y no una
+    # restricción de forma del dato. Este máximo sí es de forma: bcrypt trunca
+    # en 72 bytes, así que una contraseña más larga que eso simplemente
+    # perdería los caracteres de más sin que nadie se entere.
+    contrasena: str = Field(min_length=1, max_length=72)
+
+
+class IniciarSesionRequest(BaseModel):
+    """Cuerpo de POST /api/auth/iniciar-sesion."""
+
+    correo: str = Field(min_length=1, max_length=180)
+    contrasena: str = Field(min_length=1, max_length=72)
+
+
+class UsuarioResponse(BaseModel):
+    """El titular autenticado, sin su hash de contraseña."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre_completo: str
+    correo: str
+    moneda_preferida: Moneda
+
+
+class SesionResponse(BaseModel):
+    """Lo que devuelve registrarse o iniciar sesión: el token y quién es."""
+
+    token: str
+    usuario: UsuarioResponse
+
+
 class CrearCategoriaRequest(BaseModel):
     """Cuerpo de POST /api/categorias.
 

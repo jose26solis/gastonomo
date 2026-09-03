@@ -5,10 +5,17 @@ from collections.abc import Iterator
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.business.seguridad.contrasenas import hashear_contrasena
 from app.config.settings import obtener_configuracion
 from app.data.models.base import Base
 from app.data.models.enums import Moneda
 from app.data.models.usuario import Usuario
+
+# Solo para una base recién creada, en una instalación nueva -no es la
+# contraseña de ninguna cuenta real ya existente (ver la nota de migración en
+# el README, sección "Registro y varios usuarios").
+_CORREO_DEMOSTRACION = "demo@gastonomo.cr"
+_CONTRASENA_DEMOSTRACION = "demo1234"
 
 _configuracion = obtener_configuracion()
 
@@ -36,10 +43,14 @@ def crear_tablas() -> None:
 
 
 def sembrar_usuario_de_demostracion() -> None:
-    """Deja creado el usuario 1 para poder probar la API sin pantalla de registro.
+    """Deja creado un usuario de prueba en una base recién creada, con contraseña real.
 
-    El registro de cuentas es trabajo de un laboratorio posterior; mientras tanto
-    este usuario es el dueno de las categorias que se creen desde Swagger o curl.
+    Solo corre en una base vacía (ver el `if` de abajo): en cualquier base que
+    ya tenga usuarios -como la de quien ya venía usando la app antes de que
+    existiera el login- no toca nada. Antes esto sembraba un usuario con un
+    `contrasena_hash` que no era un hash de nada ("pendiente-laboratorio-de-
+    autenticacion"): servía mientras el `usuario_id` se escribía a mano en la
+    URL, pero con login real ese valor nunca calzaría con ninguna contraseña.
     """
     with FabricaDeSesiones() as sesion:
         if sesion.scalars(select(Usuario).limit(1)).first() is not None:
@@ -47,8 +58,8 @@ def sembrar_usuario_de_demostracion() -> None:
         sesion.add(
             Usuario(
                 nombre_completo="Usuario de demostracion",
-                correo="demo@gastonomo.cr",
-                contrasena_hash="pendiente-laboratorio-de-autenticacion",
+                correo=_CORREO_DEMOSTRACION,
+                contrasena_hash=hashear_contrasena(_CONTRASENA_DEMOSTRACION),
                 moneda_preferida=Moneda.CRC,
             )
         )

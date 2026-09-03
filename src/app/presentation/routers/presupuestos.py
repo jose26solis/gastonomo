@@ -7,7 +7,12 @@ correo y no tiene sentido en un router que solo conoce presupuestos.
 
 from fastapi import APIRouter, Query
 
-from app.presentation.dependencies import ServicioDePresupuestos
+from app.presentation.dependencies import (
+    ServicioDePresupuestos,
+    UsuarioActualDependencia,
+    VerificarTitular,
+    verificar_mismo_usuario,
+)
 from app.presentation.schemas import CrearPresupuestoRequest, PresupuestoResponse
 
 router = APIRouter(prefix="/api/presupuestos", tags=["presupuestos"])
@@ -15,8 +20,11 @@ router = APIRouter(prefix="/api/presupuestos", tags=["presupuestos"])
 
 @router.post("", response_model=PresupuestoResponse, summary="Crear o corregir un presupuesto")
 def crear_o_actualizar(
-    peticion: CrearPresupuestoRequest, servicio: ServicioDePresupuestos
+    peticion: CrearPresupuestoRequest,
+    servicio: ServicioDePresupuestos,
+    usuario_actual: UsuarioActualDependencia,
 ) -> PresupuestoResponse:
+    verificar_mismo_usuario(usuario_actual, peticion.usuario_id)
     presupuesto = servicio.crear_o_actualizar(
         usuario_id=peticion.usuario_id,
         categoria_id=peticion.categoria_id,
@@ -34,6 +42,7 @@ def crear_o_actualizar(
 )
 def listar(
     servicio: ServicioDePresupuestos,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     anio: int = Query(ge=2000, le=2100),
     mes: int = Query(ge=1, le=12),
@@ -46,6 +55,7 @@ def listar(
 def eliminar(
     presupuesto_id: int,
     servicio: ServicioDePresupuestos,
+    _: VerificarTitular,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
 ) -> None:
     servicio.eliminar(usuario_id, presupuesto_id)

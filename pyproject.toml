@@ -26,6 +26,9 @@ dependencies = [
     # arma el reporte en PDF. Python puro -sin GTK/Cairo del sistema, que en
     # Windows suele complicar instalar alternativas como weasyprint.
     "reportlab>=4.0",
+    # hashea las contraseñas de login. Costo fijo y sal incluida en el hash
+    # -sin parámetros que ajustar a mano, a diferencia de un KDF genérico.
+    "bcrypt>=4.1",
 ]
 
 [project.optional-dependencies]
