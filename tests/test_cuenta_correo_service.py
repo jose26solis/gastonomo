@@ -381,7 +381,27 @@ def test_detectar_bancos_saca_el_dominio_de_un_remitente_con_nombre_para_mostrar
 
     detectados = servicio.detectar_bancos(usuario.id)
 
-    assert detectados[0].dominio == "bncr.fi.cr"
+    dominios = {b.dominio: b for b in detectados}
+    assert dominios["bncr.fi.cr"].remitente_ejemplo == "Banco Nacional <avisos@bncr.fi.cr>"
+
+
+def test_detectar_bancos_encuentra_bac_aunque_su_asunto_no_diga_banco(
+    servicio: CuentaCorreoService, usuario: Usuario
+) -> None:
+    """Las notificaciones reales de BAC dicen "Notificacion de transaccion" en el
+    asunto, nunca la palabra "banco" -si `detectar_bancos` dependiera solo de
+    `buscar_por_texto`, BAC desapareceria de su propia pantalla. Se confirma
+    aparte, con el mismo filtro de remitente exacto que `probar_conexion`.
+    """
+    _vincular(servicio, usuario)
+    servicio.proveedores[ProveedorCorreo.OUTLOOK].buscar_por_texto = (  # type: ignore[attr-defined]
+        lambda token, texto, limite: []
+    )
+
+    detectados = servicio.detectar_bancos(usuario.id)
+
+    dominios = {b.dominio: b for b in detectados}
+    assert dominios["baccredomatic.cr"].es_bac is True
 
 
 def test_detectar_bancos_sin_ninguna_cuenta_vinculada_no_falla(

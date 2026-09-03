@@ -1,6 +1,7 @@
 """Reglas de negocio de las cuentas de correo vinculadas."""
 
 import re
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -391,7 +392,7 @@ class CuentaCorreoService:
         return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
 
     def detectar_bancos(self, usuario_id: int, limite: int = 30) -> list[BancoDetectado]:
-        """Busca "banco" en cada buzón activo del titular y agrupa los remitentes por dominio.
+        """Confirma BAC y busca "banco" en el asunto de cada buzón activo del titular.
 
         A diferencia de `comprobantes_de_usuario`, esto no sincroniza ni
         guarda nada -es una búsqueda de punta a punta, sin caché, porque no
@@ -400,6 +401,23 @@ class CuentaCorreoService:
         de mostrar una lista inventada y muestre en su lugar qué otros
         bancos parecen estar escribiéndole al titular, aunque Gastonomo
         todavía no sepa leerlos.
+
+        BAC se confirma aparte, con el mismo filtro exacto de remitente que ya
+        usa `probar_conexion` -no a través de la búsqueda de "banco" de más
+        abajo. Sus notificaciones reales dicen "Notificación de transacción"
+        en el asunto, nunca la palabra "banco"; si dependiera solo de esa
+        búsqueda, BAC -el único banco que este sistema ya sabe leer de
+        verdad- desaparecería de su propia pantalla.
+
+        Para el resto, `buscar_por_texto` restringe la búsqueda al asunto -no
+        al cuerpo completo- para no traer boletines que solo mencionan la
+        palabra de pasada; no es perfecto (una alerta de empleo de LinkedIn
+        sobre una vacante "en un banco" también calza), por eso cada
+        candidato queda marcado como eso, un candidato, nunca como
+        confirmado. El orden por cantidad de mensajes en `sort()` de más
+        abajo es el segundo filtro, para que un solo mensaje suelto de un
+        dominio quede al final en vez de mezclado con remitentes que sí
+        escriben seguido.
         """
         self._asegurar_usuario_activo(usuario_id)
         cuentas_activas = [
@@ -410,18 +428,40 @@ class CuentaCorreoService:
 
         agrupado: dict[tuple[int, str], list[MensajeResumido]] = {}
         cuenta_por_grupo: dict[tuple[int, str], CuentaCorreo] = {}
+
+        def _agregar(cuenta: CuentaCorreo, mensajes: list[MensajeResumido]) -> None:
+            for mensaje in mensajes:
+                clave = (cuenta.id, _dominio_de(mensaje.remitente))
+                existentes = agrupado.setdefault(clave, [])
+                # La confirmación de BAC y la búsqueda de "banco" son dos
+                # peticiones separadas; si el mismo mensaje calzara en ambas
+                # -no debería pasar en la práctica, pero nada lo impide- no
+                # hay que contarlo dos veces.
+                if any(m.identificador == mensaje.identificador for m in existentes):
+                    continue
+                existentes.append(mensaje)
+                cuenta_por_grupo[clave] = cuenta
+
         for cuenta in cuentas_activas:
             try:
                 token = self._token_acceso_vigente(cuenta)
-                mensajes = self._proveedor(cuenta.proveedor).buscar_por_texto(
-                    token, "banco", limite
-                )
-            except (ReglaDeNegocioViolada, ErrorDeProveedorExterno):
+            except ReglaDeNegocioViolada:
                 continue
-            for mensaje in mensajes:
-                clave = (cuenta.id, _dominio_de(mensaje.remitente))
-                agrupado.setdefault(clave, []).append(mensaje)
-                cuenta_por_grupo[clave] = cuenta
+            proveedor = self._proveedor(cuenta.proveedor)
+
+            # Un fallo puntual acá no debe tapar los candidatos de abajo.
+            with suppress(ErrorDeProveedorExterno):
+                _agregar(
+                    cuenta,
+                    proveedor.listar_mensajes_recientes(
+                        token, limite, remitente_contiene=DOMINIO_REMITENTE_BAC
+                    ),
+                )
+
+            try:
+                _agregar(cuenta, proveedor.buscar_por_texto(token, "banco", limite))
+            except ErrorDeProveedorExterno:
+                continue
 
         detectados = []
         for (cuenta_id, dominio), mensajes in agrupado.items():

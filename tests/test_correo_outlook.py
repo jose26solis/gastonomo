@@ -193,6 +193,29 @@ def test_sin_filtro_no_se_manda_search_ni_consistency_level() -> None:
     assert peticion.url.params.get("$orderby") == "receivedDateTime desc"
 
 
+def test_buscar_por_texto_restringe_la_busqueda_al_asunto() -> None:
+    """`subject:` acota la búsqueda de `detectar_bancos` al asunto, no al cuerpo entero.
+
+    Probado contra buzones reales: sin este prefijo, "banco" en cualquier
+    parte del cuerpo trae boletines que solo la mencionan de pasada (ver la
+    nota en `ProveedorDeCorreo.buscar_por_texto`).
+    """
+    peticiones: list[httpx.Request] = []
+
+    def espia(peticion: httpx.Request) -> httpx.Response:
+        peticiones.append(peticion)
+        return _microsoft_simulado(peticion)
+
+    proveedor = OutlookProveedor(
+        httpx.Client(transport=httpx.MockTransport(espia)), _configuracion()
+    )
+    proveedor.buscar_por_texto("token", "banco", limite=5)
+
+    peticion = next(p for p in peticiones if p.url.path == "/v1.0/me/messages")
+    assert peticion.url.params.get("$search") == '"subject:banco"'
+    assert peticion.headers.get("ConsistencyLevel") == "eventual"
+
+
 def test_obtiene_el_cuerpo_del_mensaje_en_texto_plano(proveedor: OutlookProveedor) -> None:
     """El mock ya comprueba, dentro del handler, que viaja el header Prefer."""
     cuerpo = proveedor.obtener_cuerpo_de_mensaje("token", "abc123")

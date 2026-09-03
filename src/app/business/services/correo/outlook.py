@@ -130,10 +130,12 @@ class OutlookProveedor:
         return mensajes[:limite]
 
     def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
-        """`$search` sin el prefijo `from:` es texto libre de Graph -mira remitente, asunto
-        y cuerpo. Sin reconfirmar nada del lado del cliente después: a diferencia de
+        """`subject:texto` restringe `$search` de Graph al asunto -sin el prefijo
+        buscaría también remitente y cuerpo, y eso trae boletines y avisos que solo
+        mencionan la palabra de pasada (ver la nota en `ProveedorDeCorreo.buscar_por_texto`).
+        Sin reconfirmar nada del lado del cliente después: a diferencia de
         `listar_mensajes_recientes`, acá no hay una sola subcadena exacta que el texto
-        tenga que cumplir -puede calzar en cualquiera de los tres campos.
+        tenga que cumplir.
         """
         encabezados = self._encabezado(token_acceso)
         encabezados["ConsistencyLevel"] = "eventual"
@@ -142,7 +144,7 @@ class OutlookProveedor:
             headers=encabezados,
             params={
                 "$select": "id,subject,from,receivedDateTime",
-                "$search": f'"{texto}"',
+                "$search": f'"subject:{texto}"',
                 "$top": limite,
             },
         )

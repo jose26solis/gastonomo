@@ -72,15 +72,20 @@ class ProveedorDeCorreo(Protocol):
         ...
 
     def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
-        """Busca `texto` en cualquier parte del mensaje -remitente, asunto, cuerpo- no
-        solo en la dirección del remitente como `listar_mensajes_recientes`.
+        """Busca `texto` en el asunto del mensaje -no en el remitente ni en el cuerpo.
 
         Es lo que usa `detectar_bancos`: buscar la palabra "banco" encuentra
         notificaciones de bancos que todavía no tienen parser propio, no
-        solo las de BAC Credomatic que ya se leen con confianza. No filtra
-        ni ordena del lado del cliente -a diferencia de
-        `listar_mensajes_recientes`, acá no hay una subcadena exacta contra
-        la que reconfirmar- así que el orden y qué tan bien calza cada
-        resultado los decide el buscador de cada proveedor.
+        solo las de BAC Credomatic que ya se leen con confianza. Se probó
+        contra buzones reales buscando en cualquier parte del mensaje -la
+        forma obvia de hacerlo- y trajo boletines y avisos que solo
+        mencionaban "banco" de pasada en el cuerpo (LinkedIn, boletines de
+        millas); un banco que de verdad le escribe a su cliente pone la
+        palabra en el asunto casi siempre ("Su banco le informa..."), un
+        remitente que la menciona de pasada casi nunca. No filtra ni ordena
+        del lado del cliente -a diferencia de `listar_mensajes_recientes`,
+        acá no hay una subcadena exacta contra la que reconfirmar- así que
+        el orden y qué tan bien calza cada resultado los decide el buscador
+        de cada proveedor.
         """
         ...

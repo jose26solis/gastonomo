@@ -118,10 +118,11 @@ class GmailProveedor:
         ]
 
     def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
-        """`q` sin el prefijo `from:` es búsqueda de texto libre de Gmail -mira remitente,
-        asunto y cuerpo, igual que la caja de búsqueda de gmail.com.
+        """`subject:texto` restringe la búsqueda de Gmail al asunto -sin el prefijo
+        buscaría también en el cuerpo, y eso trae boletines y avisos que solo
+        mencionan la palabra de pasada (ver la nota en `ProveedorDeCorreo.buscar_por_texto`).
         """
-        parametros: dict[str, str | int] = {"maxResults": limite, "q": texto}
+        parametros: dict[str, str | int] = {"maxResults": limite, "q": f"subject:{texto}"}
         listado = self._cliente.get(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages",
             headers=self._encabezado(token_acceso),

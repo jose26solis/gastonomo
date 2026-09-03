@@ -175,6 +175,28 @@ def test_sin_filtro_no_se_manda_el_parametro_q() -> None:
     assert "q" not in peticion_de_listado.url.params
 
 
+def test_buscar_por_texto_restringe_la_busqueda_al_asunto() -> None:
+    """`subject:` acota la búsqueda de `detectar_bancos` al asunto, no al cuerpo entero.
+
+    Probado contra buzones reales: sin este prefijo, "banco" en cualquier
+    parte del cuerpo trae boletines que solo la mencionan de pasada (ver la
+    nota en `ProveedorDeCorreo.buscar_por_texto`).
+    """
+    peticiones: list[httpx.Request] = []
+
+    def espia(peticion: httpx.Request) -> httpx.Response:
+        peticiones.append(peticion)
+        return _google_simulado(peticion)
+
+    proveedor = GmailProveedor(httpx.Client(transport=httpx.MockTransport(espia)), _configuracion())
+    mensajes = proveedor.buscar_por_texto("token", "banco", limite=5)
+
+    peticion = next(p for p in peticiones if p.url.path == "/gmail/v1/users/me/messages")
+    assert peticion.url.params.get("q") == "subject:banco"
+    assert len(mensajes) == 1
+    assert mensajes[0].remitente == "NotificacionBAC@baccredomatic.cr"
+
+
 def test_obtiene_el_cuerpo_de_texto_plano_aunque_venga_anidado(proveedor: GmailProveedor) -> None:
     """La parte de texto vive dos niveles adentro: alternative -> related -> text/plain."""
     cuerpo = proveedor.obtener_cuerpo_de_mensaje("token", "msg-anidado")

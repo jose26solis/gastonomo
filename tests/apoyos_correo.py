@@ -90,9 +90,10 @@ class ProveedorDeCorreoFalso:
         return _CUERPOS_DE_MENSAJE[identificador]
 
     def buscar_por_texto(self, token_acceso: str, texto: str, limite: int) -> list[MensajeResumido]:
-        """Simula una búsqueda de texto libre: a diferencia del filtro por remitente,
-        esta sí encuentra el mensaje que no es de BAC -es justo el caso que
-        `detectar_bancos` necesita poder ver.
+        """Simula una búsqueda restringida al asunto: a diferencia del filtro por
+        remitente, esta sí encuentra el mensaje que no es de BAC -es justo el caso
+        que `detectar_bancos` necesita poder ver- pero solo si "banco" está en el
+        asunto, igual que el proveedor real.
         """
         mensajes = [
             MensajeResumido(
@@ -114,4 +115,4 @@ class ProveedorDeCorreoFalso:
                 recibido_en=datetime.now(UTC) - timedelta(days=1),
             ),
         ]
-        return [m for m in mensajes if texto.lower() in (m.remitente + m.asunto).lower()][:limite]
+        return [m for m in mensajes if texto.lower() in m.asunto.lower()][:limite]
