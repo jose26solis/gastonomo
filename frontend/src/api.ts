@@ -123,11 +123,18 @@ export const api = {
    * al proveedor de correo. No hay un límite de tiempo especial en el fetch
    * -el componente que llama esto debe mostrar un estado de carga mientras espera.
    */
-  resumenFinanciero(usuarioId: number, limite = 200): Promise<ResumenFinancieroConFuente> {
+  resumenFinanciero(
+    usuarioId: number,
+    moneda?: string,
+    limite = 200,
+  ): Promise<ResumenFinancieroConFuente> {
     const parametros = new URLSearchParams({
       usuario_id: String(usuarioId),
       limite: String(limite),
     });
+    // Sin `moneda`, cada movimiento conserva la suya y las monedas no se
+    // suman entre sí -el comportamiento por defecto.
+    if (moneda) parametros.set("moneda", moneda);
     return peticion(`/api/cuentas-correo/resumen-financiero?${parametros.toString()}`);
   },
 

@@ -71,11 +71,16 @@ export interface ComprobanteConFuente extends ComprobanteParseado {
   cuenta_correo_id: number;
   proveedor: Proveedor;
   direccion_cuenta: string;
+  /** Lo que cobró el banco, si este movimiento se convirtió a otra moneda. */
+  monto_original: string | null;
+  moneda_original: string | null;
 }
 
 export interface ResumenFinancieroConFuente {
   comprobantes: ComprobanteConFuente[];
   por_mes: ResumenMensual[];
+  /** La tasa con la que se convirtió todo, si se pidió una moneda única. */
+  conversion: TipoDeCambio | null;
 }
 
 export interface Categoria {

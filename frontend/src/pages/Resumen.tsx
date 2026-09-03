@@ -57,6 +57,10 @@ export function Resumen({
   // el titular elige explícitamente un mes anterior en el selector.
   const [periodoElegido, setPeriodoElegido] = useState<{ anio: number; mes: number } | null>(null);
   const [tipoDeCambio, setTipoDeCambio] = useState<TipoDeCambio | null>(null);
+  // "" = sin convertir, cada movimiento en su moneda (el comportamiento
+  // honesto por defecto). Con "CRC" o "USD", el backend pasa todo a esa
+  // moneda para poder dar un balance único.
+  const [monedaUnica, setMonedaUnica] = useState<"" | "CRC" | "USD">("");
 
   useEffect(() => {
     let cancelado = false;
@@ -101,7 +105,7 @@ export function Resumen({
     let cancelado = false;
     setCargando(true);
     api
-      .resumenFinanciero(usuarioId)
+      .resumenFinanciero(usuarioId, monedaUnica || undefined)
       .then((r) => {
         if (cancelado) return;
         setResumen(r);
@@ -123,7 +127,7 @@ export function Resumen({
     };
     // onEstadoDeSincronizacion es un canal de salida, no una dependencia de datos.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cuentas === null, claveCuentasActivas, usuarioId]);
+  }, [cuentas === null, claveCuentasActivas, usuarioId, monedaUnica]);
 
   const datos = useMemo(() => {
     if (!resumen || resumen.por_mes.length === 0) return null;
@@ -298,34 +302,55 @@ export function Resumen({
 
   const periodoActualElegido = { anio: datos.mesActual.anio, mes: datos.mesActual.mes };
 
+  const estiloSelect = {
+    padding: "6px 8px",
+    background: "var(--color-surface-2)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 8,
+    color: "var(--color-text)",
+    fontSize: 11.5,
+  };
+
   return (
     <div className="stack">
-      {datos.periodos.length > 1 && (
-        <div className="card" style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span style={{ fontSize: 11.5, color: "var(--color-text-dim)" }}>Período</span>
-          <select
-            value={`${periodoActualElegido.anio}-${periodoActualElegido.mes}`}
-            onChange={(e) => {
-              const [anio, mes] = e.target.value.split("-").map(Number);
-              setPeriodoElegido({ anio, mes });
-            }}
-            style={{
-              padding: "6px 8px",
-              background: "var(--color-surface-2)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 8,
-              color: "var(--color-text)",
-              fontSize: 11.5,
-            }}
-          >
-            {datos.periodos.map((p) => (
-              <option key={`${p.anio}-${p.mes}`} value={`${p.anio}-${p.mes}`}>
-                {formatearMes(p.anio, p.mes)}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="card" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        {datos.periodos.length > 1 && (
+          <>
+            <span style={{ fontSize: 11.5, color: "var(--color-text-dim)" }}>Período</span>
+            <select
+              value={`${periodoActualElegido.anio}-${periodoActualElegido.mes}`}
+              onChange={(e) => {
+                const [anio, mes] = e.target.value.split("-").map(Number);
+                setPeriodoElegido({ anio, mes });
+              }}
+              style={estiloSelect}
+            >
+              {datos.periodos.map((p) => (
+                <option key={`${p.anio}-${p.mes}`} value={`${p.anio}-${p.mes}`}>
+                  {formatearMes(p.anio, p.mes)}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <span style={{ fontSize: 11.5, color: "var(--color-text-dim)" }}>Moneda</span>
+        <select
+          value={monedaUnica}
+          onChange={(e) => setMonedaUnica(e.target.value as "" | "CRC" | "USD")}
+          style={estiloSelect}
+        >
+          <option value="">Cada una en la suya</option>
+          <option value="CRC">Todo en colones (₡)</option>
+          <option value="USD">Todo en dólares ($)</option>
+        </select>
+        {resumen?.conversion && (
+          <span style={{ fontSize: 10.5, color: "var(--color-text-dim)", flex: 1, minWidth: 220 }}>
+            Convertido a ₡{resumen.conversion.venta} por dólar, tipo de cambio de venta del{" "}
+            {resumen.conversion.fecha} (Banco Central). Los meses anteriores se convierten con esa
+            misma tasa, no con la de su fecha.
+          </span>
+        )}
+      </div>
 
       <div className="grid grid-4">
         <KpiCard
@@ -399,7 +424,13 @@ export function Resumen({
         <ResumenCuenta cuentas={cuentasActivas} comprobantes={resumen?.comprobantes ?? []} />
       </div>
 
-      <MovimientosRecientes movimientos={datos.movimientosRecientes} tipoDeCambio={tipoDeCambio} />
+      {/* Con el panel en una sola moneda, el equivalente suelto sobra: lo que
+          hace falta ver al lado de cada monto convertido es el original, y de
+          eso se encarga `monto_original`. */}
+      <MovimientosRecientes
+        movimientos={datos.movimientosRecientes}
+        tipoDeCambio={monedaUnica ? null : tipoDeCambio}
+      />
     </div>
   );
 }
@@ -736,12 +767,14 @@ function MovimientosRecientes({
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {movimientos.map((m, i) => {
-            // Un movimiento en dólares se muestra en su moneda real, con el
-            // equivalente en colones al lado -no convertido en silencio: el
-            // monto que cobraron es el de arriba, este es una referencia.
-            const equivalente =
-              m.moneda !== "CRC" && m.moneda === "USD" && tipoDeCambio
-                ? Number(m.monto) * Number(tipoDeCambio.venta)
+            // Nunca se muestra solo el número convertido: o se ve el monto
+            // real con su equivalente al lado, o -si el panel está en una
+            // sola moneda- se ve el convertido con el original debajo. El
+            // dato de lo que el banco cobró de verdad no desaparece.
+            const referencia = m.moneda_original
+              ? `${formatearMonto(-Number(m.monto_original), m.moneda_original)} reales`
+              : m.moneda === "USD" && tipoDeCambio
+                ? `≈ ${formatearMonto(-Number(m.monto) * Number(tipoDeCambio.venta), "CRC")}`
                 : null;
             return (
               <div
@@ -786,9 +819,9 @@ function MovimientosRecientes({
                   <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
                     {formatearMonto(-Number(m.monto), m.moneda!)}
                   </span>
-                  {equivalente !== null && (
+                  {referencia && (
                     <span style={{ fontSize: 10, color: "var(--color-text-dim)", fontVariantNumeric: "tabular-nums" }}>
-                      ≈ {formatearMonto(-equivalente, "CRC")}
+                      {referencia}
                     </span>
                   )}
                 </span>

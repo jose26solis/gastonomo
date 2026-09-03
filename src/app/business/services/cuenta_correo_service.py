@@ -1,7 +1,8 @@
 """Reglas de negocio de las cuentas de correo vinculadas."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from app.business.errors import ErrorDeProveedorExterno, RecursoNoEncontrado, ReglaDeNegocioViolada
 from app.business.parsers.comprobante_bac import (
@@ -12,6 +13,7 @@ from app.business.parsers.comprobante_bac import (
 from app.business.seguridad.cifrado import cifrar, descifrar
 from app.business.services.correo.proveedor import MensajeResumido, ProveedorDeCorreo
 from app.business.services.resumen_service import ResumenFinanciero, agrupar_por_mes
+from app.business.services.tipo_cambio_service import TipoDeCambio, convertir
 from app.data.models.comprobante import Comprobante
 from app.data.models.cuenta_correo import CuentaCorreo
 from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
@@ -52,6 +54,56 @@ class ComprobanteConFuente:
     cuenta_correo_id: int
     proveedor: ProveedorCorreo
     direccion: str
+    # Lo que decía el comprobante antes de convertirlo, cuando se pidió el
+    # resumen en una sola moneda. Se conserva para poder mostrar "$6.00" y no
+    # solo el equivalente: el monto convertido es una referencia, el que el
+    # banco cobró de verdad es este.
+    monto_original: Decimal | None = None
+    moneda_original: str | None = None
+
+
+def convertidos_a(
+    items: list[ComprobanteConFuente], moneda_destino: str, tipo_de_cambio: TipoDeCambio
+) -> list[ComprobanteConFuente]:
+    """Pasa todos los comprobantes a una sola moneda, guardando el monto original.
+
+    Sirve para responder "cuánto gasté en total", sin más: sumar colones y
+    dólares sin convertir daría un número inventado, y mostrarlos separados
+    no responde la pregunta. Convertir con una tasa real y decir cuál se usó
+    sí la responde.
+
+    **Se convierte todo con una sola tasa**, la del día que traiga
+    `tipo_de_cambio`, incluidos los movimientos de meses anteriores. Lo
+    correcto sería usar la tasa del día de cada compra, pero eso necesita
+    consultas históricas al BCCR -que requieren suscripción, y el respaldo de
+    Hacienda solo publica el tipo de cambio del día. Quien muestre estos
+    totales tiene que decir con qué tasa se armaron; el frontend lo hace.
+    """
+    convertidos = []
+    for item in items:
+        comprobante = item.comprobante
+        if (
+            comprobante.monto is None
+            or comprobante.moneda is None
+            or comprobante.moneda == moneda_destino
+        ):
+            convertidos.append(item)
+            continue
+        convertidos.append(
+            replace(
+                item,
+                comprobante=replace(
+                    comprobante,
+                    monto=convertir(
+                        comprobante.monto, comprobante.moneda, moneda_destino, tipo_de_cambio
+                    ),
+                    moneda=moneda_destino,
+                ),
+                monto_original=comprobante.monto,
+                moneda_original=comprobante.moneda,
+            )
+        )
+    return convertidos
 
 
 def _fila_desde_parseado(

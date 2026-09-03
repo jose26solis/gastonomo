@@ -20,18 +20,24 @@ falta guardar ese estado en ningún lado ni limpiarlo después.
 """
 
 import json
+from typing import Annotated
 
 from fastapi import APIRouter, Query
 
 from app.business.errors import DatosInvalidos
 from app.business.seguridad.cifrado import TokenIlegible, cifrar, descifrar
-from app.business.services.cuenta_correo_service import ComprobanteConFuente, VincularCuentaComando
+from app.business.services.cuenta_correo_service import (
+    ComprobanteConFuente,
+    VincularCuentaComando,
+    convertidos_a,
+)
 from app.business.services.resumen_service import agrupar_por_mes, filtrar_del_periodo
-from app.data.models.enums import ProveedorCorreo
+from app.data.models.enums import Moneda, ProveedorCorreo
 from app.presentation.dependencies import (
     ServicioDeComercios,
     ServicioDeCuentasCorreo,
     ServicioDePresupuestos,
+    ServicioDeTipoCambio,
 )
 from app.presentation.schemas import (
     ComercioClasificadoResponse,
@@ -45,6 +51,7 @@ from app.presentation.schemas import (
     ResumenFinancieroConFuenteResponse,
     ResumenFinancieroResponse,
     ResumenMensualResponse,
+    TipoDeCambioResponse,
 )
 
 router = APIRouter(prefix="/api/cuentas-correo", tags=["cuentas-correo"])
@@ -145,6 +152,8 @@ def _response_desde_con_fuente(item: ComprobanteConFuente) -> ComprobanteConFuen
         cuenta_correo_id=item.cuenta_correo_id,
         proveedor=item.proveedor,
         direccion_cuenta=item.direccion,
+        monto_original=item.monto_original,
+        moneda_original=item.moneda_original,
     )
 
 
@@ -155,19 +164,39 @@ def _response_desde_con_fuente(item: ComprobanteConFuente) -> ComprobanteConFuen
 )
 def resumen_financiero_de_usuario(
     servicio: ServicioDeCuentasCorreo,
+    servicio_tipo_cambio: ServicioDeTipoCambio,
     usuario_id: int = Query(gt=0, le=2_147_483_647),
     limite: int = Query(default=200, gt=0, le=500),
+    moneda: Annotated[
+        Moneda | None,
+        Query(
+            description="Convertir todo a esta moneda. Sin este parámetro, cada movimiento "
+            "conserva la suya y las monedas no se suman entre sí."
+        ),
+    ] = None,
 ) -> ResumenFinancieroConFuenteResponse:
     """Igual que `/{cuenta_id}/resumen-financiero`, pero sumando el historial de
     TODAS las cuentas de correo activas del titular en vez de una sola -así un
     titular con Outlook y Gmail vinculados a la vez ve su gasto real completo
     en un solo lugar, con cada movimiento marcado según de qué bandeja salió.
+
+    Con `moneda`, todo se convierte a esa moneda antes de sumar, para poder
+    dar un balance único. La tasa usada viaja en `conversion`: un total
+    convertido sin decir con qué tasa se armó no es un dato verificable. Sin
+    `moneda`, el comportamiento es el de siempre -una fila de `por_mes` por
+    cada moneda, sin mezclarlas.
     """
     con_fuente = servicio.comprobantes_de_usuario(usuario_id, limite)
+    conversion = None
+    if moneda is not None:
+        conversion = servicio_tipo_cambio.obtener()
+        con_fuente = convertidos_a(con_fuente, moneda.value, conversion)
+
     comprobantes = [c.comprobante for c in con_fuente]
     return ResumenFinancieroConFuenteResponse(
         comprobantes=[_response_desde_con_fuente(c) for c in con_fuente],
         por_mes=[ResumenMensualResponse.model_validate(r) for r in agrupar_por_mes(comprobantes)],
+        conversion=TipoDeCambioResponse.model_validate(conversion) if conversion else None,
     )
 
 

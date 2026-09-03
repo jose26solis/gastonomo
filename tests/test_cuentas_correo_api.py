@@ -1,11 +1,16 @@
 """La API de vinculación de correo, de punta a punta con un proveedor falso."""
 
+from datetime import date
+from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
+from app.business.services.tipo_cambio_service import TipoDeCambio
 from app.data.models.enums import Moneda
 from app.data.models.usuario import Usuario
+from app.main import app
+from app.presentation.dependencies import obtener_servicio_de_tipo_cambio
 from app.presentation.routers.cuentas_correo import _codificar_estado
 
 
@@ -233,4 +238,70 @@ def test_el_resumen_combinado_sin_cuentas_vinculadas_no_falla(
     )
 
     assert respuesta.status_code == 200
-    assert respuesta.json() == {"comprobantes": [], "por_mes": []}
+    assert respuesta.json() == {"comprobantes": [], "por_mes": [], "conversion": None}
+
+
+def _con_tipo_de_cambio(venta: str = "500.00"):
+    """Sustituye el servicio del tipo de cambio por uno fijo, sin red."""
+
+    class _Fijo:
+        def obtener(self, fecha=None):
+            return TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal(venta), venta=Decimal(venta))
+
+    return _Fijo()
+
+
+def test_el_resumen_puede_pedirse_convertido_a_una_sola_moneda(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario
+) -> None:
+    """Con `moneda`, todo se pasa a esa moneda y las monedas dejan de separarse.
+
+    El comprobante del doble de prueba es de 7870.00 colones; a 500 por dólar
+    son 15.74 dólares por buzón, 31.48 entre los dos.
+    """
+    app.dependency_overrides[obtener_servicio_de_tipo_cambio] = _con_tipo_de_cambio
+    try:
+        estado = _codificar_estado(usuario.id)
+        for proveedor in ("outlook", "gmail"):
+            cliente_con_dos_buzones.get(
+                f"/api/cuentas-correo/{proveedor}/callback", params={"code": "c", "state": estado}
+            )
+
+        respuesta = cliente_con_dos_buzones.get(
+            "/api/cuentas-correo/resumen-financiero",
+            params={"usuario_id": usuario.id, "moneda": "USD"},
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_tipo_cambio]
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert len(cuerpo["por_mes"]) == 1, "convertido, el mes deja de tener una fila por moneda"
+    assert cuerpo["por_mes"][0]["moneda"] == "USD"
+    assert cuerpo["por_mes"][0]["total"] == "31.48"
+    assert cuerpo["conversion"]["venta"] == "500.00", (
+        "la tasa usada tiene que viajar en la respuesta"
+    )
+    # El monto que cobró el banco se conserva, no se pierde al convertir.
+    movimiento = cuerpo["comprobantes"][0]
+    assert movimiento["monto"] == "15.74"
+    assert movimiento["monto_original"] == "7870.00"
+    assert movimiento["moneda_original"] == "CRC"
+
+
+def test_sin_el_parametro_moneda_no_se_convierte_nada(
+    cliente_con_dos_buzones: TestClient, usuario: Usuario
+) -> None:
+    """El comportamiento por defecto no cambia: cada movimiento en su moneda."""
+    estado = _codificar_estado(usuario.id)
+    cliente_con_dos_buzones.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    )
+
+    cuerpo = cliente_con_dos_buzones.get(
+        "/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id}
+    ).json()
+
+    assert cuerpo["conversion"] is None
+    assert cuerpo["comprobantes"][0]["moneda"] == "CRC"
+    assert cuerpo["comprobantes"][0]["monto_original"] is None

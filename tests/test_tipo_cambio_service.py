@@ -20,7 +20,11 @@ import httpx
 import pytest
 
 from app.business.errors import ErrorDeProveedorExterno
-from app.business.services.tipo_cambio_service import TipoCambioService
+from app.business.services.tipo_cambio_service import (
+    TipoCambioService,
+    TipoDeCambio,
+    convertir,
+)
 from app.config.settings import Configuracion
 
 
@@ -255,3 +259,39 @@ def test_una_respuesta_que_no_es_xml_valido_da_error_de_proveedor_externo() -> N
 
     with pytest.raises(ErrorDeProveedorExterno):
         servicio.obtener(date(2026, 9, 2))
+
+
+def test_convertir_usa_la_venta_en_las_dos_direcciones() -> None:
+    """Convertir de ida y vuelta tiene que volver al mismo número.
+
+    Si se usara venta para un lado y compra para el otro, pasar 100 dólares a
+    colones y de vuelta a dólares daría menos de 100 -una fuga silenciosa en
+    cada conversión.
+    """
+    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+
+    en_colones = convertir(Decimal("100.00"), "USD", "CRC", tasa)
+    de_vuelta = convertir(en_colones, "CRC", "USD", tasa)
+
+    assert en_colones == Decimal("45172.00")
+    assert de_vuelta == Decimal("100.00")
+
+
+def test_convertir_a_la_misma_moneda_no_toca_el_monto() -> None:
+    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+
+    assert convertir(Decimal("7600.00"), "CRC", "CRC", tasa) == Decimal("7600.00")
+
+
+def test_convertir_una_moneda_sin_tasa_la_deja_como_esta() -> None:
+    """Inventar una tasa para el euro seria peor que no convertir."""
+    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+
+    assert convertir(Decimal("50.00"), "EUR", "CRC", tasa) == Decimal("50.00")
+
+
+def test_convertir_redondea_a_dos_decimales() -> None:
+    tasa = TipoDeCambio(fecha=date(2026, 9, 2), compra=Decimal("445.58"), venta=Decimal("451.72"))
+
+    assert convertir(Decimal("6.00"), "USD", "CRC", tasa) == Decimal("2710.32")
+    assert convertir(Decimal("1000.00"), "CRC", "USD", tasa) == Decimal("2.21")

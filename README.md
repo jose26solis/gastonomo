@@ -142,7 +142,7 @@ la parte del sistema que va más allá de lo que exige el Laboratorio 2:
 | Comercios y categorías | Normaliza el nombre del comercio, sugiere su categoría según lo que ese usuario ya clasificó antes (por usuario, no global) y deja confirmar o corregir | [`comercio_service.py`](src/app/business/services/comercio_service.py) |
 | Presupuestos | Límite mensual por categoría; el consumo se calcula en vivo contra el gasto real de ese mismo período y esa misma moneda (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`), nunca se guarda como un número aparte | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
 | Reportes exportables | Movimientos en CSV y Excel, resumen del mes más reciente en PDF | [`reportes.py`](src/app/presentation/routers/reportes.py) |
-| Tipo de cambio de referencia | Equivalente aproximado en colones de un movimiento en dólares, vía el Banco Central -solo de referencia, nunca se suma a los totales | [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py) |
+| Conversión de moneda | Equivalente en colones de un movimiento en dólares, vía el Banco Central. Por defecto es solo referencia; con el selector de moneda del Resumen, todo se convierte a una sola moneda para dar un balance único, diciendo con qué tasa | [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py) |
 | Frontend completo | Siete pantallas con datos reales o marcadas explícitamente como ejemplo | ver [Correr el frontend](#correr-el-frontend) |
 
 Dos decisiones de dominio que valen la pena explicar:
@@ -175,10 +175,20 @@ siguiente (bandeja al día) menos de 1s.
 
 ### Conversión de moneda (Banco Central de Costa Rica)
 
-El Resumen nunca mezcla monedas en sus totales -es una regla del dominio, no un detalle- pero un
-mes con gasto en colones **y** en dólares (un peaje y un viaje de Uber, por ejemplo) puede mostrar,
-aparte, cuánto valdrían esos dólares en colones. Es solo de referencia: el número que se suma en
-las tarjetas de arriba nunca cambia por esto.
+Por defecto el Resumen no mezcla monedas en sus totales -es una regla del dominio, no un detalle-
+pero un mes con gasto en colones **y** en dólares (un peaje y un viaje de Uber, por ejemplo)
+muestra aparte cuánto valdrían esos dólares en colones, solo de referencia.
+
+El selector de **moneda** del Resumen cambia eso a propósito: eligiendo "Todo en colones" o "Todo
+en dólares", cada movimiento se convierte a esa moneda antes de sumar y el panel entero pasa a dar
+un balance único. No es lo mismo que mezclar a ciegas: hay una tasa real detrás, la pantalla dice
+cuál y de qué día, y cada movimiento convertido sigue mostrando el monto que el banco cobró de
+verdad. Dos advertencias que la propia pantalla hace explícitas:
+
+- **Se usa una sola tasa, la de hoy, también para los meses anteriores.** Lo correcto sería la del
+  día de cada compra, pero eso necesita consultas históricas al BCCR (ver más abajo).
+- Se convierte con el tipo de cambio de **venta** en las dos direcciones, para que convertir de ida
+  y vuelta dé el mismo número. Una moneda que no sea CRC ni USD se deja sin tocar.
 
 La fuente es el
 [Servicio Web de Indicadores Económicos](https://gee.bccr.fi.cr/Indicadores/Suscripciones/WS/wsindicadoreseconomicos.asmx)
@@ -319,7 +329,7 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/cuentas-correo/outlook/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Outlook |
 | `GET` | `/api/cuentas-correo/gmail/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Gmail |
 | `GET` | `/api/cuentas-correo?usuario_id=1` | Lista los buzones vinculados de un usuario |
-| `GET` | `/api/cuentas-correo/resumen-financiero?usuario_id=1` | **Combina** todos los buzones activos y suma por mes; cada comprobante viene marcado con el buzón del que salió |
+| `GET` | `/api/cuentas-correo/resumen-financiero?usuario_id=1` | **Combina** todos los buzones activos y suma por mes; cada comprobante viene marcado con el buzón del que salió. Con `&moneda=CRC` (o `USD`) convierte todo a esa moneda y devuelve la tasa usada en `conversion` |
 | `GET` | `/api/cuentas-correo/comercios?usuario_id=1` | Clasifica los comercios de todos los buzones activos |
 | `GET` | `/api/cuentas-correo/presupuestos?usuario_id=1&anio=2026&mes=9` | Estado de los presupuestos contra el gasto real de todos los buzones activos |
 | `GET` | `/api/cuentas-correo/reportes/movimientos.csv?usuario_id=1` | Exporta a CSV los movimientos de todos los buzones activos (ídem `.xlsx` y `resumen.pdf`) |
@@ -574,7 +584,7 @@ Pendiente:
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
 - [ ] Autenticación y roles (titular, administrador) — hoy el `usuario_id` se elige a mano
-- [ ] Pruebas automatizadas de frontend (el backend tiene 167 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 173 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta

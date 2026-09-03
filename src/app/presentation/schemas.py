@@ -134,6 +134,16 @@ class ResumenMensualResponse(BaseModel):
     cantidad_transacciones: int
 
 
+class TipoDeCambioResponse(BaseModel):
+    """Tipo de cambio de referencia del colón contra el dólar, del Banco Central."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fecha: date
+    compra: Decimal
+    venta: Decimal
+
+
 class ResumenFinancieroResponse(BaseModel):
     """Los comprobantes de BAC leídos de la bandeja, y su suma por mes."""
 
@@ -154,6 +164,11 @@ class ComprobanteConFuenteResponse(ComprobanteParseadoResponse):
     cuenta_correo_id: int
     proveedor: ProveedorCorreo
     direccion_cuenta: str
+    # Solo vienen cuando se pidió el resumen en una moneda única y este
+    # movimiento hubo que convertirlo. `monto` ya trae el valor convertido;
+    # estos dos dicen qué cobró el banco de verdad.
+    monto_original: Decimal | None = None
+    moneda_original: str | None = None
 
 
 class ResumenFinancieroConFuenteResponse(BaseModel):
@@ -163,6 +178,10 @@ class ResumenFinancieroConFuenteResponse(BaseModel):
 
     comprobantes: list[ComprobanteConFuenteResponse]
     por_mes: list[ResumenMensualResponse]
+    # Con qué tasa se convirtió todo, si se pidió una moneda única. Va en la
+    # respuesta para que la pantalla pueda decirlo: un total convertido sin
+    # decir con qué tasa y de qué día no es un dato, es una cifra suelta.
+    conversion: TipoDeCambioResponse | None = None
 
 
 class ResultadoDeSincronizacionResponse(BaseModel):
@@ -173,16 +192,6 @@ class ResultadoDeSincronizacionResponse(BaseModel):
     comprobantes_nuevos: int
     comprobantes_totales: int
     sincronizado_en: datetime
-
-
-class TipoDeCambioResponse(BaseModel):
-    """Tipo de cambio de referencia del colón contra el dólar, del Banco Central."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    fecha: date
-    compra: Decimal
-    venta: Decimal
 
 
 class ComercioResponse(BaseModel):

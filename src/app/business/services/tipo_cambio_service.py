@@ -39,7 +39,7 @@ reintenta parseando el texto interno como un segundo documento.
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from xml.etree import ElementTree
 
 import httpx
@@ -64,6 +64,29 @@ class TipoDeCambio:
     fecha: date
     compra: Decimal
     venta: Decimal
+
+
+MONEDAS_CONVERTIBLES = ("CRC", "USD")
+
+
+def convertir(monto: Decimal, desde: str, hacia: str, tipo_de_cambio: TipoDeCambio) -> Decimal:
+    """Pasa un monto de una moneda a la otra, redondeado a dos decimales.
+
+    Se usa el tipo de cambio de **venta** en las dos direcciones, no venta
+    para una y compra para la otra. La razón es que esto convierte *gastos*:
+    la pregunta que responde es "cuánto me habría costado esto en la otra
+    moneda", y para eso la referencia es siempre lo que cuesta comprar
+    dólares. Usar dos tasas distintas según la dirección haría que convertir
+    de ida y vuelta no diera el mismo número, que es peor que ser
+    ligeramente conservador.
+
+    Una moneda que no sea CRC ni USD se devuelve sin tocar: no hay tasa para
+    ella, e inventar una sería peor que no convertir.
+    """
+    if desde == hacia or desde not in MONEDAS_CONVERTIBLES or hacia not in MONEDAS_CONVERTIBLES:
+        return monto
+    convertido = monto * tipo_de_cambio.venta if hacia == "CRC" else monto / tipo_de_cambio.venta
+    return convertido.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class TipoCambioService:
