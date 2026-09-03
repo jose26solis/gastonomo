@@ -233,9 +233,10 @@ def transferencias_sinpe_de_usuario(
 
     Vacío sin tocar la red si el titular tiene apagado "Leer transferencias
     SINPE" en Ajustes -ver la nota en
-    `CuentaCorreoService.transferencias_sinpe_de_usuario`. Solo BAC y Banco
-    Nacional tienen lector hoy; un remitente de otro banco que también
-    mande SINPE no aparece acá todavía.
+    `CuentaCorreoService.transferencias_sinpe_de_usuario`. BAC y Banco
+    Nacional tienen lector exacto (`confirmado=True`); cualquier otro banco
+    pasa por un lector genérico y llega marcado `confirmado=False` -la
+    pantalla lo muestra igual, pero para revisar.
     """
     con_fuente = servicio.transferencias_sinpe_de_usuario(usuario_id, limite)
     return [
@@ -251,6 +252,7 @@ def transferencias_sinpe_de_usuario(
             comprobante=t.transferencia.comprobante,
             confianza=t.transferencia.confianza,
             es_confiable=t.transferencia.es_confiable,
+            confirmado=t.transferencia.confirmado,
             cuenta_correo_id=t.cuenta_correo_id,
             proveedor=t.proveedor,
             direccion_cuenta=t.direccion,

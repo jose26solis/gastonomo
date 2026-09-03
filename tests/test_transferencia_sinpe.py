@@ -65,13 +65,46 @@ def test_el_monto_es_decimal_exacto(sinpe_bncr: str) -> None:
     assert resultado.monto * 2 == Decimal("51000.00")
 
 
-def test_un_remitente_de_un_banco_no_soportado_no_se_intenta_leer() -> None:
-    """Un candidato de `detectar_bancos` sin lector todavia: no hay que adivinarle el formato."""
-    resultado = parsear_transferencia_sinpe(
-        "info@promerica.fi.cr", "Su transferencia SINPE fue procesada."
+def test_un_remitente_de_un_banco_no_soportado_usa_el_lector_generico() -> None:
+    """Un candidato de `detectar_bancos` sin lector exacto: se intenta con patrones
+    sueltos en vez de adivinarle el formato completo, y queda marcado sin confirmar."""
+    texto = (
+        "Le informamos que se acredito una transferencia SINPE en su cuenta "
+        "CR05010200009012345678 el 12/04/2026.\n"
+        "Monto: 45,000.00 colones\n"
+        "Referencia: 998877665544\n"
     )
 
-    assert resultado is None
+    resultado = parsear_transferencia_sinpe("avisos@promerica.fi.cr", texto)
+
+    assert resultado.banco == "promerica.fi.cr"
+    assert resultado.cuenta_destino == "CR05010200009012345678"
+    assert resultado.moneda == "CRC"
+    assert resultado.monto == Decimal("45000.00")
+    assert resultado.referencia == "998877665544"
+    assert resultado.confirmado is False
+    assert resultado.destinatario is None, "el saludo varía demasiado entre bancos para adivinarlo"
+
+
+def test_bac_y_bncr_quedan_marcados_como_confirmados(sinpe_bncr: str, sinpe_bac: str) -> None:
+    bncr = parsear_transferencia_sinpe("bncontacto@bncr.fi.cr", sinpe_bncr)
+    bac = parsear_transferencia_sinpe("notificaciones@baccredomatic.cr", sinpe_bac)
+
+    assert bncr.confirmado is True
+    assert bac.confirmado is True
+
+
+def test_el_lector_generico_de_un_correo_sin_nada_util_no_inventa_campos() -> None:
+    """Un correo que solo menciona la palabra de pasada -el mismo caso que hace
+    falso positivo en `detectar_bancos`- no debe salir con campos inventados."""
+    resultado = parsear_transferencia_sinpe(
+        "jobalerts-noreply@linkedin.com", "Alertas de empleo en un banco cerca de vos."
+    )
+
+    assert resultado.confirmado is False
+    assert resultado.confianza == 0.0
+    assert resultado.monto is None
+    assert resultado.cuenta_destino is None
 
 
 def test_el_concepto_de_bac_no_arrastra_los_guiones_de_relleno(sinpe_bac: str) -> None:

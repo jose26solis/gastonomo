@@ -314,10 +314,12 @@ class BancoDetectadoResponse(BaseModel):
 class TransferenciaSinpeResponse(BaseModel):
     """Una transferencia SINPE recibida, ya leída y parseada, con la cuenta de la que salió.
 
-    Solo bancos con lector -BAC y Banco Nacional, ver
-    `business/parsers/transferencia_sinpe.py`- llegan hasta acá: un remitente
-    sin lector no se guarda ni se muestra, porque no hay forma de confirmar
-    sus campos sin adivinar el formato.
+    BAC y Banco Nacional tienen lector exacto, validado contra una
+    notificación real de cada uno (`confirmado=True`). Cualquier otro banco
+    pasa por un lector genérico -patrones sueltos, no una plantilla propia-
+    y queda con `confirmado=False`: la pantalla lo muestra igual, pero
+    marcado para revisar en vez de darlo por bueno. Ver
+    `business/parsers/transferencia_sinpe.py`.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -333,6 +335,7 @@ class TransferenciaSinpeResponse(BaseModel):
     comprobante: str | None
     confianza: float
     es_confiable: bool
+    confirmado: bool
     cuenta_correo_id: int
     proveedor: ProveedorCorreo
     direccion_cuenta: str

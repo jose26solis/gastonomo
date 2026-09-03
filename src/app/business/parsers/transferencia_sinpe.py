@@ -2,15 +2,24 @@
 
 A diferencia de `comprobante_bac.py` -un formato fijo de "Etiqueta: valor", una
 linea por campo- una notificacion de SINPE es una oracion en prosa, y cada banco
-la redacta distinto. Por eso este archivo tiene un lector por banco, cada uno
-comprobado contra una notificacion real de ese banco, y una funcion que elige
-cual usar segun el dominio del remitente -el mismo criterio que ya separa los
-`ProveedorDeCorreo` por proveedor de correo.
+la redacta distinto. Por eso este archivo tiene un lector exacto por banco, cada
+uno comprobado contra una notificacion real de ese banco (BAC, Banco Nacional).
+
+Para cualquier otro remitente -uno que `detectar_bancos` ya sabe que existe,
+pero del que todavia no hay una notificacion real para validar un lector
+exacto- hay un lector generico (`_parsear_generico`): busca los mismos
+patrones que casi cualquier notificacion de SINPE comparte -un monto con su
+moneda, una cuenta IBAN, una fecha, un numero de referencia- en vez de una
+plantilla fija. Es menos preciso que un lector validado, así que nunca se
+hace pasar por uno: cada resultado trae `confirmado=False`, y la pantalla lo
+marca para revisar en vez de darlo por bueno solo porque el patron calzó.
+Uno que no calza casi nada (`confianza` baja) ni siquiera llega a guardarse
+-ver el umbral en `CuentaCorreoService._sincronizar_transferencias_sinpe`.
 
 Solo se leen transferencias **recibidas** (acreditadas a la cuenta del titular):
-es lo unico que hay una notificacion real para confirmar. Una transferencia
+es lo unico que hay notificaciones reales para confirmar. Una transferencia
 enviada por el titular tendria una redaccion distinta -no hay una muestra real
-todavia, asi que este lector no intenta adivinarla.
+todavia, asi que ni el lector exacto ni el generico intentan adivinarla.
 """
 
 import re
@@ -53,6 +62,25 @@ _BAC_MONTO = re.compile(r"por un monto de\s*([\d.,]+)\s*(Colones|D.lares)", re.I
 _BAC_CONCEPTO = re.compile(r"por concepto de\s*([^_.]+)", re.DOTALL)
 _BAC_FECHA_HORA = re.compile(rf"D.a y hora\s*(\d{{2}}/\d{{2}}/\d{{4}})\s+({_HORA})")
 
+# Patrones sueltos, no atados a la redacción de un banco en particular -es lo
+# que usa `_parsear_generico` para un remitente sin lector exacto. Cada uno
+# busca la forma en que casi cualquier notificación de SINPE en Costa Rica
+# escribe ese dato, no una frase completa como los patrones de arriba.
+_GEN_CUENTA = re.compile(rf"\b({_IBAN})\b")
+_GEN_FECHA = re.compile(r"\b(\d{1,2}/\d{1,2}/\d{2,4})\b")
+_GEN_MONTO = re.compile(
+    r"([\d]{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(colones|d.lares|dolares|crc|usd)", re.IGNORECASE
+)
+_GEN_REFERENCIA = re.compile(r"referencia\D{0,12}?(\d{6,30})", re.IGNORECASE)
+_GEN_COMPROBANTE = re.compile(r"comprobante\D{0,12}?(\d{4,20})", re.IGNORECASE)
+_GEN_CONCEPTO = re.compile(r"concepto\D{0,12}?:?\s*([^\n.]{3,80})", re.IGNORECASE)
+_GEN_DOMINIO = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)")
+
+_MONEDAS_GENERICO = {
+    "colones": "CRC", "crc": "CRC", "₡": "CRC",
+    "dolares": "USD", "dólares": "USD", "usd": "USD", "$": "USD",
+}  # fmt: skip
+
 
 @dataclass(frozen=True)
 class TransferenciaSinpeParseada:
@@ -73,6 +101,10 @@ class TransferenciaSinpeParseada:
     # Solo el Banco Nacional lo incluye en el mensaje; BAC no.
     comprobante: str | None
     confianza: float
+    # False para el lector genérico: el patrón calzó, pero nadie validó este
+    # formato contra una notificación real de ese banco en particular. La
+    # pantalla lo muestra igual -es mejor que nada- pero marcado para revisar.
+    confirmado: bool = True
 
     @property
     def es_confiable(self) -> bool:
@@ -80,20 +112,21 @@ class TransferenciaSinpeParseada:
         return self.confianza >= 0.75
 
 
-def parsear_transferencia_sinpe(remitente: str, texto: str) -> TransferenciaSinpeParseada | None:
+def parsear_transferencia_sinpe(remitente: str, texto: str) -> TransferenciaSinpeParseada:
     """Elige el lector segun el dominio del remitente y lee la notificacion.
 
-    Devuelve `None` -no lanza excepcion- para un remitente que no es ninguno de
-    los dos bancos que este lector sabe leer todavia: es una situacion normal
-    (`detectar_bancos` encuentra remitentes de SINPE de otros bancos todo el
-    tiempo), no un error del programa.
+    BAC y Banco Nacional tienen lector exacto, validado contra una
+    notificación real de cada uno. Cualquier otro remitente cae al lector
+    genérico (`_parsear_generico`): nunca devuelve `None` -de eso se encarga
+    el umbral de confianza en `CuentaCorreoService._sincronizar_transferencias_sinpe`,
+    que descarta lo que el patrón genérico no pudo leer en absoluto.
     """
     dominio = remitente.lower()
     if DOMINIO_REMITENTE_BNCR in dominio:
         return _parsear_bncr(texto)
     if DOMINIO_REMITENTE_BAC in dominio:
         return _parsear_bac(texto)
-    return None
+    return _parsear_generico(remitente, texto)
 
 
 def _parsear_bncr(texto: str) -> TransferenciaSinpeParseada:
@@ -142,6 +175,59 @@ def _parsear_bac(texto: str) -> TransferenciaSinpeParseada:
     )
 
 
+def _parsear_generico(remitente: str, texto: str) -> TransferenciaSinpeParseada:
+    """Lee lo que pueda con patrones sueltos, para un remitente sin lector exacto.
+
+    No hay una notificación real de este banco contra la cual validar un
+    lector propio -ver la nota del módulo. Lo que sí hay es que casi
+    cualquier notificación de SINPE en Costa Rica menciona un monto con su
+    moneda, una cuenta IBAN, una fecha y un número de referencia; buscar
+    esos cuatro patrones sueltos encuentra algo en un banco nuevo sin
+    inventarle el formato completo. `destinatario` se deja en blanco a
+    propósito: el saludo ("Hola...", "Estimado(a)...") varía demasiado entre
+    bancos como para arriesgar un nombre equivocado.
+    """
+    cuenta_destino = _primer_grupo(_GEN_CUENTA, texto)
+    fecha = _primera_fecha_generica(texto)
+    moneda, monto = _leer_monto(_GEN_MONTO, texto, monedas=_MONEDAS_GENERICO)
+    referencia = _primer_grupo(_GEN_REFERENCIA, texto)
+
+    return TransferenciaSinpeParseada(
+        banco=_dominio_generico(remitente),
+        destinatario=None,
+        cuenta_destino=cuenta_destino,
+        fecha=fecha,
+        moneda=moneda,
+        monto=monto,
+        concepto=_primer_grupo(_GEN_CONCEPTO, texto),
+        referencia=referencia,
+        comprobante=_primer_grupo(_GEN_COMPROBANTE, texto),
+        confianza=_confianza(cuenta_destino, fecha, monto, referencia),
+        confirmado=False,
+    )
+
+
+def _dominio_generico(remitente: str) -> str:
+    """Saca el dominio de un remitente para usarlo como nombre de banco -no hay
+    un nombre curado para un banco que todavía no tiene lector propio."""
+    coincidencia = _GEN_DOMINIO.search(remitente)
+    return coincidencia.group(1).lower() if coincidencia else remitente.lower()
+
+
+def _primera_fecha_generica(texto: str) -> datetime | None:
+    """`15/03/2026` -> datetime a medianoche. Sin hora: su formato varía demasiado
+    entre bancos como para adivinarla, y agrupar por mes no la necesita."""
+    coincidencia = _GEN_FECHA.search(texto)
+    if coincidencia is None:
+        return None
+    dia, mes, anio_str = coincidencia.group(1).split("/")
+    anio = int(anio_str) if len(anio_str) == 4 else 2000 + int(anio_str)
+    try:
+        return datetime(anio, int(mes), int(dia))
+    except ValueError:
+        return None
+
+
 def _confianza(
     cuenta_destino: str | None,
     fecha: datetime | None,
@@ -163,7 +249,9 @@ def _primer_grupo(patron: re.Pattern[str], texto: str) -> str | None:
     return coincidencia.group(1).strip() if coincidencia else None
 
 
-def _leer_monto(patron: re.Pattern[str], texto: str) -> tuple[str | None, Decimal | None]:
+def _leer_monto(
+    patron: re.Pattern[str], texto: str, monedas: dict[str, str] = _MONEDAS
+) -> tuple[str | None, Decimal | None]:
     """`25,500.00 Colones` -> moneda ISO y monto exacto.
 
     La coma separa miles y el punto separa decimales, igual que en
@@ -173,7 +261,7 @@ def _leer_monto(patron: re.Pattern[str], texto: str) -> tuple[str | None, Decima
     coincidencia = patron.search(texto)
     if coincidencia is None:
         return None, None
-    moneda = _MONEDAS.get(coincidencia.group(2).lower())
+    moneda = monedas.get(coincidencia.group(2).lower())
     try:
         return moneda, Decimal(coincidencia.group(1).replace(",", ""))
     except ArithmeticError:

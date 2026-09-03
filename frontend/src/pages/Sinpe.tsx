@@ -119,9 +119,10 @@ export function Sinpe({
       {error && <p className="mensaje-error">{error}</p>}
 
       <MuestraBadge>
-        Transferencias SINPE recibidas, leídas de verdad de tu correo. Solo BAC y el Banco
-        Nacional tienen lector hoy -otro banco que también te escriba avisos de SINPE todavía no
-        aparece acá.
+        Transferencias SINPE recibidas, leídas de verdad de tu correo. BAC y el Banco Nacional
+        tienen lector exacto; cualquier otro banco se intenta leer con patrones generales
+        (monto, cuenta, fecha, referencia) y queda marcado "Sin confirmar" -revisá esos antes de
+        confiar en el monto.
       </MuestraBadge>
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -133,7 +134,7 @@ export function Sinpe({
       {transferencias === null && <p className="vacio">Buscando transferencias SINPE en tu correo…</p>}
 
       {transferencias !== null && transferencias.length === 0 && (
-        <p className="vacio">No encontramos transferencias SINPE de BAC ni del Banco Nacional.</p>
+        <p className="vacio">No encontramos ninguna transferencia SINPE en tu correo.</p>
       )}
 
       {transferencias?.map((t, i) => (
@@ -153,7 +154,23 @@ export function Sinpe({
               <ArrowsLeftRight size={16} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13 }}>{t.banco}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ fontSize: 13 }}>{t.banco}</span>
+                {!t.confirmado && (
+                  <span
+                    style={{
+                      fontSize: 9.5,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                      color: "var(--color-text-muted)",
+                      border: "1px solid var(--color-surface-2)",
+                    }}
+                    title="Este banco no tiene un lector propio validado -se leyó con patrones generales."
+                  >
+                    Sin confirmar
+                  </span>
+                )}
+              </div>
               <div style={{ fontSize: 10.5, color: "var(--color-text-dim)", marginTop: 2 }}>
                 {t.concepto ?? "Sin concepto"}
                 {t.cuenta_destino ? ` · ${t.cuenta_destino}` : ""}

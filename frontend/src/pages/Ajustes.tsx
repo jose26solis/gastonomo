@@ -118,8 +118,9 @@ function PreferenciaSinpe({
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 12.5 }}>Leer transferencias SINPE</div>
           <div style={{ fontSize: 11, color: "var(--color-text-dim)", marginTop: 3, lineHeight: 1.5 }}>
-            Busca de verdad en tu correo y muestra el resultado en la pestaña SINPE. Solo BAC y
-            Banco Nacional tienen lector hoy.
+            Busca de verdad en tu correo y muestra el resultado en la pestaña SINPE. BAC y Banco
+            Nacional tienen lector exacto; otros bancos se leen con patrones generales, marcados
+            para revisar.
           </div>
         </div>
         <button

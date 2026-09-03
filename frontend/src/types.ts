@@ -182,9 +182,10 @@ export interface BancoDetectado {
 }
 
 /**
- * Una transferencia SINPE recibida, ya leída y parseada. Solo bancos con
- * lector -BAC y Banco Nacional- llegan hasta acá; un remitente sin lector
- * no se guarda ni se muestra.
+ * Una transferencia SINPE recibida, ya leída y parseada. BAC y Banco Nacional
+ * tienen lector exacto (`confirmado: true`); cualquier otro banco pasa por un
+ * lector genérico de patrones sueltos y llega con `confirmado: false` -se
+ * muestra igual, pero marcada para revisar.
  */
 export interface TransferenciaSinpe {
   banco: string;
@@ -199,6 +200,7 @@ export interface TransferenciaSinpe {
   comprobante: string | null;
   confianza: number;
   es_confiable: boolean;
+  confirmado: boolean;
   cuenta_correo_id: number;
   proveedor: Proveedor;
   direccion_cuenta: string;

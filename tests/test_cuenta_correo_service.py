@@ -468,15 +468,17 @@ def test_transferencias_sinpe_no_relee_lo_ya_sincronizado(
     )
 
 
-def test_transferencias_sinpe_de_un_banco_sin_lector_no_se_guarda(
+def test_transferencias_sinpe_de_un_banco_sin_lector_y_sin_datos_utiles_no_se_guarda(
     servicio: CuentaCorreoService, usuario: Usuario, sesion: Session
 ) -> None:
-    """`detectar_bancos` sí puede ver un remitente sin lector; una transferencia no
-    se inventa el formato -ver `parsear_transferencia_sinpe`."""
+    """`detectar_bancos` sí puede ver un remitente sin lector exacto; el lector
+    genérico lo intenta, pero un mensaje sin nada que extraer no se guarda -ver
+    `_CONFIANZA_MINIMA_PARA_GUARDAR_TRANSFERENCIA`."""
     _vincular(servicio, usuario)
     usuario.leer_transferencias_sinpe = True
     sesion.commit()
-    servicio.proveedores[ProveedorCorreo.OUTLOOK].buscar_por_texto = (  # type: ignore[attr-defined]
+    proveedor = servicio.proveedores[ProveedorCorreo.OUTLOOK]
+    proveedor.buscar_por_texto = (  # type: ignore[attr-defined]
         lambda token, texto, limite: [
             MensajeResumido(
                 identificador="9",
@@ -486,10 +488,47 @@ def test_transferencias_sinpe_de_un_banco_sin_lector_no_se_guarda(
             )
         ]
     )
+    proveedor.obtener_cuerpo_de_mensaje = (  # type: ignore[attr-defined]
+        lambda token, identificador: "Su transferencia SINPE fue procesada con éxito."
+    )
 
     resultado = servicio.transferencias_sinpe_de_usuario(usuario.id)
 
     assert resultado == []
+
+
+def test_transferencias_sinpe_de_un_banco_sin_lector_pero_con_datos_utiles_se_guarda_sin_confirmar(
+    servicio: CuentaCorreoService, usuario: Usuario, sesion: Session
+) -> None:
+    """Un banco sin lector propio, pero cuya notificación sí trae los campos que el
+    lector genérico sabe reconocer, se guarda igual -marcado para revisar."""
+    _vincular(servicio, usuario)
+    usuario.leer_transferencias_sinpe = True
+    sesion.commit()
+    proveedor = servicio.proveedores[ProveedorCorreo.OUTLOOK]
+    proveedor.buscar_por_texto = (  # type: ignore[attr-defined]
+        lambda token, texto, limite: [
+            MensajeResumido(
+                identificador="9",
+                remitente="info@promerica.fi.cr",
+                asunto="Su transferencia SINPE fue procesada",
+                recibido_en=datetime.now(UTC),
+            )
+        ]
+    )
+    proveedor.obtener_cuerpo_de_mensaje = (  # type: ignore[attr-defined]
+        lambda token, identificador: (
+            "Se acreditó una transferencia SINPE en su cuenta CR05010200009012345678 "
+            "el 12/04/2026.\nMonto: 45,000.00 colones\nReferencia: 998877665544\n"
+        )
+    )
+
+    resultado = servicio.transferencias_sinpe_de_usuario(usuario.id)
+
+    assert len(resultado) == 1
+    assert resultado[0].transferencia.banco == "promerica.fi.cr"
+    assert resultado[0].transferencia.confirmado is False
+    assert resultado[0].transferencia.monto == Decimal("45000.00")
 
 
 def test_transferencias_sinpe_sin_ninguna_cuenta_vinculada_no_falla(

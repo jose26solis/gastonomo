@@ -9,7 +9,7 @@ deduplicación.
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.data.models.base import Base
@@ -49,6 +49,9 @@ class TransferenciaSinpe(Base):
     # Solo el Banco Nacional lo incluye en su notificación; BAC no.
     comprobante: Mapped[str | None] = mapped_column(String(60), nullable=True)
     confianza: Mapped[float] = mapped_column(nullable=False)
+    # False si salió del lector genérico (`transferencia_sinpe.py`), no de un
+    # lector validado contra una notificación real de ese banco.
+    confirmado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     def __repr__(self) -> str:
         return (

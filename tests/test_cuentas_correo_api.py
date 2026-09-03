@@ -540,6 +540,7 @@ def test_transferencias_sinpe_lee_bac_y_bncr_una_vez_prendido(
     for t in cuerpo:
         assert t["monto"] is not None
         assert t["es_confiable"] is True
+        assert t["confirmado"] is True, "BAC y Banco Nacional tienen lector exacto"
 
 
 def test_transferencias_sinpe_de_otro_titular_se_traduce_a_403(

@@ -164,6 +164,14 @@ class BancoDetectado:
 
 _PATRON_CORREO = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)")
 
+# Bajo esto, el lector genérico de `transferencia_sinpe.py` no encontró
+# suficiente como para que valga la pena guardarlo -es lo que descarta un
+# correo que solo mencionó "transferencia" de pasada (ver la nota en
+# `_sincronizar_transferencias_sinpe`). BAC y Banco Nacional, con su lector
+# exacto, casi siempre dan 1.0 -este umbral en la práctica solo filtra al
+# lector genérico.
+_CONFIANZA_MINIMA_PARA_GUARDAR_TRANSFERENCIA = 0.5
+
 
 def _dominio_de(remitente: str) -> str:
     """Saca el dominio de un remitente, sea `correo@dominio.cr` o `Nombre <correo@dominio.cr>`.
@@ -238,6 +246,7 @@ def _fila_transferencia_desde_parseada(
         referencia=parseada.referencia,
         comprobante=parseada.comprobante,
         confianza=parseada.confianza,
+        confirmado=parseada.confirmado,
     )
 
 
@@ -253,6 +262,7 @@ def _transferencia_parseada_desde_fila(fila: TransferenciaSinpe) -> Transferenci
         referencia=fila.referencia,
         comprobante=fila.comprobante,
         confianza=fila.confianza,
+        confirmado=fila.confirmado,
     )
 
 
@@ -672,6 +682,12 @@ class CuentaCorreoService:
         de compras, que ya se muestra en otras pantallas -mezclar los dos
         haría parecer que un buzón sin ninguna transferencia SINPE nunca se
         sincronizó, aunque sus compras sí estén al día.
+
+        `parsear_transferencia_sinpe` ya no devuelve `None`: para un banco sin
+        lector exacto usa uno genérico, marcado `confirmado=False`. Lo que
+        descarta el ruido acá es la confianza -un mensaje que solo mencionó
+        "transferencia" de pasada, sin ningún campo real que extraer, nunca
+        llega a `_CONFIANZA_MINIMA_PARA_GUARDAR_TRANSFERENCIA`.
         """
         token_acceso = self._token_acceso_vigente(cuenta)
         proveedor = self._proveedor(cuenta.proveedor)
@@ -689,8 +705,8 @@ class CuentaCorreoService:
             except ErrorDeProveedorExterno:
                 continue
             parseada = parsear_transferencia_sinpe(mensaje.remitente, cuerpo)
-            if parseada is None:
-                continue  # Remitente sin lector todavia: no se inventa el formato.
+            if parseada.confianza < _CONFIANZA_MINIMA_PARA_GUARDAR_TRANSFERENCIA:
+                continue  # Ni el lector exacto ni el genérico encontraron suficiente.
             self.transferencias_sinpe.agregar(
                 _fila_transferencia_desde_parseada(cuenta.id, mensaje.identificador, parseada)
             )

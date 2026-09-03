@@ -285,8 +285,9 @@ Sin esa variable, sigue usando SQLite exactamente como antes.
 > ```
 >
 > Son idempotentes -correrlos de más no hace nada- así que ante la duda conviene correr todos los
-> de la carpeta, en orden (el más nuevo, `003_transferencias_sinpe.sql`, agrega la tabla de
-> transferencias SINPE y la bandera `leer_transferencias_sinpe` de `usuario`).
+> de la carpeta, en orden (`003_transferencias_sinpe.sql` agrega la tabla de transferencias SINPE
+> y la bandera `leer_transferencias_sinpe` de `usuario`; el más nuevo, `004_...`, le suma la
+> columna `confirmado` a esa tabla).
 
 ### 1. Clonar y crear el entorno virtual
 
@@ -363,7 +364,7 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/cuentas-correo?usuario_id=1` | Lista los buzones vinculados de un usuario |
 | `GET` | `/api/cuentas-correo/resumen-financiero?usuario_id=1` | **Combina** todos los buzones activos y suma por mes; cada comprobante viene marcado con el buzón del que salió. Con `&moneda=CRC` (o `USD`) convierte todo a esa moneda y devuelve la tasa usada en `conversion` |
 | `GET` | `/api/cuentas-correo/bancos?usuario_id=1` | Busca "banco" en el asunto de todos los buzones activos y agrupa los remitentes por dominio -candidatos, no confirmaciones: solo BAC tiene parser |
-| `GET` | `/api/cuentas-correo/transferencias-sinpe?usuario_id=1` | Busca "transferencia" en el asunto y parsea las que sabe leer (BAC, Banco Nacional). Vacío sin tocar la red si "Leer transferencias SINPE" está apagado |
+| `GET` | `/api/cuentas-correo/transferencias-sinpe?usuario_id=1` | Busca "transferencia" en el asunto; BAC y Banco Nacional con lector exacto, cualquier otro banco con uno genérico (`confirmado: false`). Vacío sin tocar la red si "Leer transferencias SINPE" está apagado |
 | `GET` | `/api/cuentas-correo/comercios?usuario_id=1` | Clasifica los comercios de todos los buzones activos |
 | `GET` | `/api/cuentas-correo/presupuestos?usuario_id=1&anio=2026&mes=9` | Estado de los presupuestos contra el gasto real de todos los buzones activos |
 | `GET` | `/api/cuentas-correo/reportes/movimientos.csv?usuario_id=1` | Exporta a CSV los movimientos de todos los buzones activos (ídem `.xlsx` y `resumen.pdf`) |
@@ -612,7 +613,7 @@ vinculado, estas pantallas quedan disponibles:
 | **Reportes** | Descarga de CSV, Excel y PDF de los movimientos reales |
 | **Conectar correo** | Vincular o desvincular Outlook y Gmail |
 | **Bancos** | Busca "banco" de verdad en los buzones vinculados y agrupa por dominio del remitente; BAC aparece "Conectado" (tiene parser), el resto queda marcado como candidato sin soporte todavía |
-| **SINPE** | Transferencias SINPE recibidas, reales, de BAC y Banco Nacional; apagada por default -se prende desde acá o desde Ajustes ("Leer transferencias SINPE") |
+| **SINPE** | Transferencias SINPE recibidas, reales; BAC y Banco Nacional con lector exacto, cualquier otro banco detectado automáticamente con patrones generales y marcado "Sin confirmar". Apagada por default -se prende desde acá o desde Ajustes |
 | **Ajustes** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
 
 Cada comprobante de BAC se lee y se guarda una sola vez -ver
@@ -774,18 +775,24 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
 - [x] **Interfaz responsiva y proyecto móvil (Capacitor)** *(adelantado)* — el mismo frontend
       empaquetado para Android/iOS, íconos, manifest de PWA, política de privacidad y términos de
       uso reales. Ver [Camino a publicar en App Store y Play Store](#camino-a-publicar-en-app-store-y-play-store).
-- [x] **Transferencias SINPE recibidas, leídas de verdad** *(adelantado)* — parser propio de BAC y
+- [x] **Transferencias SINPE recibidas, leídas de verdad** *(adelantado)* — parser exacto de BAC y
       del Banco Nacional, cada uno validado contra una notificación real (ver
-      `business/parsers/transferencia_sinpe.py`); pestaña SINPE nueva, conectada al interruptor
-      "Leer transferencias SINPE" de Ajustes -apagado por default, porque sincronizar es una
-      petición real por buzón.
+      `business/parsers/transferencia_sinpe.py`); cualquier otro banco cae a un lector genérico
+      (monto, cuenta IBAN, fecha, referencia -los mismos campos que casi cualquier notificación de
+      SINPE comparte) y queda marcado `confirmado: false` -la pantalla lo muestra igual, pero para
+      revisar, nunca como un dato tan confiable como los de BAC/Banco Nacional. Un mensaje sin
+      nada útil que extraer ni siquiera llega a guardarse. Pestaña SINPE nueva, conectada al
+      interruptor "Leer transferencias SINPE" de Ajustes -apagado por default, porque sincronizar
+      es una petición real por buzón.
 
 Pendiente:
 
 - [ ] Conectar la aplicación a MongoDB para lo que corresponda al subdominio documental
 - [x] Vinculación de Gmail en el frontend, de punta a punta contra una cuenta real de Google
-- [ ] Sumar otros bancos además de BAC a las compras, y otros bancos además de BAC/Banco Nacional
-      a las transferencias SINPE -en ambos casos, contra una notificación real de cada uno
+- [ ] Sumar otros bancos además de BAC a las compras -contra una notificación real de cada uno,
+      igual que siempre. Para transferencias SINPE ya hay un lector genérico que cubre cualquier
+      banco de forma aproximada (ver arriba); un lector exacto validado para otro banco puntual
+      sigue pendiente de una notificación real de ese banco
 - [ ] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
@@ -795,7 +802,7 @@ Pendiente:
 - [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
 - [ ] Recuperar una contraseña olvidada -hoy hace falta estar logueado para cambiarla; si no hay
       ninguna sesión con ese correo, no hay forma de recuperar el acceso
-- [ ] Pruebas automatizadas de frontend (el backend tiene 254 pruebas; el frontend, ninguna todavía)
+- [ ] Pruebas automatizadas de frontend (el backend tiene 257 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta
