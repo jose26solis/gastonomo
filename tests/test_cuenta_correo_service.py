@@ -18,6 +18,7 @@ from app.data.models.enums import EstadoCuentaCorreo, Moneda, ProveedorCorreo
 from app.data.models.usuario import Usuario
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from tests.apoyos_correo import ProveedorDeCorreoFalso
 
@@ -31,6 +32,7 @@ def servicio(
         UsuarioRepository(sesion),
         {ProveedorCorreo.OUTLOOK: proveedor_correo_falso},
         ComprobanteRepository(sesion),
+        TransferenciaSinpeRepository(sesion),
     )
 
 
@@ -234,6 +236,7 @@ def _servicio_con_dos_buzones(
         UsuarioRepository(sesion),
         {ProveedorCorreo.OUTLOOK: outlook, ProveedorCorreo.GMAIL: gmail},
         ComprobanteRepository(sesion),
+        TransferenciaSinpeRepository(sesion),
     )
     return servicio, outlook, gmail
 
@@ -408,3 +411,91 @@ def test_detectar_bancos_sin_ninguna_cuenta_vinculada_no_falla(
     servicio: CuentaCorreoService, usuario: Usuario
 ) -> None:
     assert servicio.detectar_bancos(usuario.id) == []
+
+
+# ---- transferencias_sinpe_de_usuario ----
+
+
+def test_transferencias_sinpe_apagado_no_toca_la_red(
+    servicio: CuentaCorreoService,
+    usuario: Usuario,
+    proveedor_correo_falso: ProveedorDeCorreoFalso,
+) -> None:
+    """`leer_transferencias_sinpe` es False por default -ver el modelo Usuario."""
+    _vincular(servicio, usuario)
+    assert usuario.leer_transferencias_sinpe is False
+
+    resultado = servicio.transferencias_sinpe_de_usuario(usuario.id)
+
+    assert resultado == []
+    assert proveedor_correo_falso.cuerpos_leidos == []
+
+
+def test_transferencias_sinpe_lee_bac_y_bncr_con_su_lector_correcto(
+    servicio: CuentaCorreoService, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular(servicio, usuario)
+    usuario.leer_transferencias_sinpe = True
+    sesion.commit()
+
+    resultado = servicio.transferencias_sinpe_de_usuario(usuario.id)
+
+    bancos = {t.transferencia.banco for t in resultado}
+    assert bancos == {"Banco Nacional", "BAC Credomatic"}
+    for t in resultado:
+        assert t.transferencia.monto is not None
+        assert t.transferencia.es_confiable is True
+        assert t.cuenta_correo_id is not None
+        assert t.proveedor == ProveedorCorreo.OUTLOOK
+
+
+def test_transferencias_sinpe_no_relee_lo_ya_sincronizado(
+    servicio: CuentaCorreoService,
+    usuario: Usuario,
+    sesion: Session,
+    proveedor_correo_falso: ProveedorDeCorreoFalso,
+) -> None:
+    _vincular(servicio, usuario)
+    usuario.leer_transferencias_sinpe = True
+    sesion.commit()
+
+    servicio.transferencias_sinpe_de_usuario(usuario.id)
+    leidos_primera_vez = list(proveedor_correo_falso.cuerpos_leidos)
+    servicio.transferencias_sinpe_de_usuario(usuario.id)
+
+    assert proveedor_correo_falso.cuerpos_leidos == leidos_primera_vez, (
+        "la segunda llamada no debe volver a pedir el cuerpo de un mensaje ya guardado"
+    )
+
+
+def test_transferencias_sinpe_de_un_banco_sin_lector_no_se_guarda(
+    servicio: CuentaCorreoService, usuario: Usuario, sesion: Session
+) -> None:
+    """`detectar_bancos` sí puede ver un remitente sin lector; una transferencia no
+    se inventa el formato -ver `parsear_transferencia_sinpe`."""
+    _vincular(servicio, usuario)
+    usuario.leer_transferencias_sinpe = True
+    sesion.commit()
+    servicio.proveedores[ProveedorCorreo.OUTLOOK].buscar_por_texto = (  # type: ignore[attr-defined]
+        lambda token, texto, limite: [
+            MensajeResumido(
+                identificador="9",
+                remitente="info@promerica.fi.cr",
+                asunto="Su transferencia SINPE fue procesada",
+                recibido_en=datetime.now(UTC),
+            )
+        ]
+    )
+
+    resultado = servicio.transferencias_sinpe_de_usuario(usuario.id)
+
+    assert resultado == []
+
+
+def test_transferencias_sinpe_sin_ninguna_cuenta_vinculada_no_falla(
+    servicio: CuentaCorreoService, usuario: Usuario, sesion: Session
+) -> None:
+    usuario.leer_transferencias_sinpe = True
+    sesion.commit()
+
+    assert servicio.transferencias_sinpe_de_usuario(usuario.id) == []

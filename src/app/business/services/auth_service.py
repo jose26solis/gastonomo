@@ -246,6 +246,17 @@ class AuthService:
         usuario.contrasena_hash = hashear_contrasena(contrasena_nueva)
         self.usuarios.sesion.commit()
 
+    def actualizar_preferencia_sinpe(self, usuario: Usuario, activo: bool) -> Usuario:
+        """Prende o apaga la lectura de transferencias SINPE para este titular.
+
+        Es el interruptor "Leer transferencias SINPE" de Ajustes.
+        `CuentaCorreoService.transferencias_sinpe_de_usuario` respeta esta
+        bandera antes de tocar la red -ver la nota en ese método.
+        """
+        usuario.leer_transferencias_sinpe = activo
+        self.usuarios.sesion.commit()
+        return usuario
+
     def _proveedor_google(self) -> IdentidadGoogleProveedor:
         if self.google is None:
             raise DatosInvalidos("Iniciar sesión con Google no está configurado en este servidor.")

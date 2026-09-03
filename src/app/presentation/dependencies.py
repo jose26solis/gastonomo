@@ -33,6 +33,7 @@ from app.data.repositories.comercio_repository import ComercioRepository
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
 from app.data.repositories.presupuesto_repository import PresupuestoRepository
+from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 
 SesionDependencia = Annotated[Session, Depends(obtener_sesion)]
@@ -80,6 +81,7 @@ def obtener_servicio_de_cuentas_correo(
         UsuarioRepository(sesion),
         proveedores,
         ComprobanteRepository(sesion),
+        TransferenciaSinpeRepository(sesion),
         obtener_servicio_de_tipo_cambio(cliente),
     )
 

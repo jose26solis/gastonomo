@@ -21,6 +21,7 @@ import type {
   Sesion,
   ResumenFinancieroConFuente,
   TipoDeCambio,
+  TransferenciaSinpe,
   UrlDeAutorizacion,
   Usuario,
 } from "./types";
@@ -168,6 +169,15 @@ export const api = {
     });
   },
 
+  /** Prende o apaga "Leer transferencias SINPE" -el interruptor de Ajustes. */
+  actualizarPreferenciaSinpe(activo: boolean): Promise<Usuario> {
+    return peticion("/api/auth/preferencias/sinpe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activo }),
+    });
+  },
+
   // ---- Cuentas de correo ----
 
   /** Pide la URL de autorización del proveedor para redirigir al titular. */
@@ -247,6 +257,16 @@ export const api = {
   detectarBancos(usuarioId: number, limite = 30): Promise<BancoDetectado[]> {
     const parametros = new URLSearchParams({ usuario_id: String(usuarioId), limite: String(limite) });
     return peticion(`/api/cuentas-correo/bancos?${parametros.toString()}`);
+  },
+
+  /**
+   * Busca "sinpe" en el asunto de todas las cuentas activas y devuelve las
+   * que sabe parsear (BAC y Banco Nacional). Vacío sin tocar la red si el
+   * titular tiene apagado "Leer transferencias SINPE" en Ajustes.
+   */
+  transferenciasSinpe(usuarioId: number, limite = 100): Promise<TransferenciaSinpe[]> {
+    const parametros = new URLSearchParams({ usuario_id: String(usuarioId), limite: String(limite) });
+    return peticion(`/api/cuentas-correo/transferencias-sinpe?${parametros.toString()}`);
   },
 
   // ---- Categorías ----

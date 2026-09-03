@@ -16,6 +16,7 @@ from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
 from app.presentation.dependencies import obtener_servicio_de_cuentas_correo
@@ -185,6 +186,7 @@ def test_exportar_pdf_sin_comprobantes_reconocidos_da_409(
         UsuarioRepository(sesion),
         {ProveedorCorreo.OUTLOOK: proveedor_vacio},
         ComprobanteRepository(sesion),
+        TransferenciaSinpeRepository(sesion),
     )
     try:
         estado = _codificar_estado(usuario.id)
@@ -275,6 +277,7 @@ def _cliente_con_mensajes(cliente: TestClient, sesion: Session, cuerpos: dict[st
         UsuarioRepository(sesion),
         {ProveedorCorreo.OUTLOOK: proveedor},
         ComprobanteRepository(sesion),
+        TransferenciaSinpeRepository(sesion),
     )
 
 

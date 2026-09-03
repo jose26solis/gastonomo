@@ -146,6 +146,8 @@ export interface Usuario {
   tiene_contrasena: boolean;
   /** Si "Iniciar sesión con Google" está activo para esta cuenta. */
   google_vinculado: boolean;
+  /** El interruptor "Leer transferencias SINPE" de Ajustes. Apagado por default. */
+  leer_transferencias_sinpe: boolean;
 }
 
 export interface UrlDeAutorizacion {
@@ -177,4 +179,27 @@ export interface BancoDetectado {
   cuenta_correo_id: number;
   proveedor: Proveedor;
   direccion: string;
+}
+
+/**
+ * Una transferencia SINPE recibida, ya leída y parseada. Solo bancos con
+ * lector -BAC y Banco Nacional- llegan hasta acá; un remitente sin lector
+ * no se guarda ni se muestra.
+ */
+export interface TransferenciaSinpe {
+  banco: string;
+  destinatario: string | null;
+  cuenta_destino: string | null;
+  fecha: string | null;
+  moneda: string | null;
+  /** Viaja como string desde Pydantic (Decimal); parsear con Number() para sumar. */
+  monto: string | null;
+  concepto: string | null;
+  referencia: string | null;
+  comprobante: string | null;
+  confianza: number;
+  es_confiable: boolean;
+  cuenta_correo_id: number;
+  proveedor: Proveedor;
+  direccion_cuenta: string;
 }

@@ -54,6 +54,7 @@ from app.presentation.schemas import (
     ResumenFinancieroResponse,
     ResumenMensualResponse,
     TipoDeCambioResponse,
+    TransferenciaSinpeResponse,
 )
 
 router = APIRouter(prefix="/api/cuentas-correo", tags=["cuentas-correo"])
@@ -215,6 +216,47 @@ def resumen_financiero_de_usuario(
         por_mes=[ResumenMensualResponse.model_validate(r) for r in agrupar_por_mes(comprobantes)],
         conversion=TipoDeCambioResponse.model_validate(conversion) if conversion else None,
     )
+
+
+@router.get(
+    "/transferencias-sinpe",
+    response_model=list[TransferenciaSinpeResponse],
+    summary="Transferencias SINPE recibidas, combinando todas las cuentas activas del titular",
+)
+def transferencias_sinpe_de_usuario(
+    servicio: ServicioDeCuentasCorreo,
+    _: VerificarTitular,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    limite: int = Query(default=100, gt=0, le=300),
+) -> list[TransferenciaSinpeResponse]:
+    """Busca "transferencia" en el asunto de cada buzón activo y parsea lo que sabe leer.
+
+    Vacío sin tocar la red si el titular tiene apagado "Leer transferencias
+    SINPE" en Ajustes -ver la nota en
+    `CuentaCorreoService.transferencias_sinpe_de_usuario`. Solo BAC y Banco
+    Nacional tienen lector hoy; un remitente de otro banco que también
+    mande SINPE no aparece acá todavía.
+    """
+    con_fuente = servicio.transferencias_sinpe_de_usuario(usuario_id, limite)
+    return [
+        TransferenciaSinpeResponse(
+            banco=t.transferencia.banco,
+            destinatario=t.transferencia.destinatario,
+            cuenta_destino=t.transferencia.cuenta_destino,
+            fecha=t.transferencia.fecha,
+            moneda=t.transferencia.moneda,
+            monto=t.transferencia.monto,
+            concepto=t.transferencia.concepto,
+            referencia=t.transferencia.referencia,
+            comprobante=t.transferencia.comprobante,
+            confianza=t.transferencia.confianza,
+            es_confiable=t.transferencia.es_confiable,
+            cuenta_correo_id=t.cuenta_correo_id,
+            proveedor=t.proveedor,
+            direccion_cuenta=t.direccion,
+        )
+        for t in con_fuente
+    ]
 
 
 @router.get(

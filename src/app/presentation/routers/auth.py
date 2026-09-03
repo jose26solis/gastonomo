@@ -18,6 +18,7 @@ from app.presentation.schemas import (
     CallbackGoogleRequest,
     CambiarContrasenaRequest,
     IniciarSesionRequest,
+    PreferenciaSinpeRequest,
     RegistrarUsuarioRequest,
     SesionResponse,
     UrlDeAutorizacionResponse,
@@ -36,6 +37,7 @@ def _respuesta_de_usuario(usuario: Usuario) -> UsuarioResponse:
         moneda_preferida=usuario.moneda_preferida,
         tiene_contrasena=usuario.contrasena_hash is not None,
         google_vinculado=usuario.google_id is not None,
+        leer_transferencias_sinpe=usuario.leer_transferencias_sinpe,
     )
 
 
@@ -93,6 +95,20 @@ def cambiar_contrasena(
         usuario_actual, peticion.contrasena_actual, peticion.contrasena_nueva
     )
     return _respuesta_de_usuario(usuario_actual)
+
+
+@router.post(
+    "/preferencias/sinpe",
+    response_model=UsuarioResponse,
+    summary="Prender o apagar la lectura de transferencias SINPE",
+)
+def actualizar_preferencia_sinpe(
+    peticion: PreferenciaSinpeRequest,
+    servicio: ServicioDeAuth,
+    usuario_actual: UsuarioActualDependencia,
+) -> UsuarioResponse:
+    usuario = servicio.actualizar_preferencia_sinpe(usuario_actual, peticion.activo)
+    return _respuesta_de_usuario(usuario)
 
 
 @router.get(

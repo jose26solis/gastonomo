@@ -240,3 +240,24 @@ def test_cambiar_contrasena_con_la_actual_incorrecta_se_traduce_a_401(
     )
 
     assert respuesta.status_code == 401
+
+
+def test_preferencia_sinpe_es_falsa_por_default(cliente: TestClient) -> None:
+    assert cliente.get("/api/auth/yo").json()["leer_transferencias_sinpe"] is False
+
+
+def test_prender_la_preferencia_sinpe(cliente: TestClient) -> None:
+    respuesta = cliente.post("/api/auth/preferencias/sinpe", json={"activo": True})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["leer_transferencias_sinpe"] is True
+    assert cliente.get("/api/auth/yo").json()["leer_transferencias_sinpe"] is True
+
+
+def test_apagar_la_preferencia_sinpe(cliente: TestClient) -> None:
+    cliente.post("/api/auth/preferencias/sinpe", json={"activo": True})
+
+    respuesta = cliente.post("/api/auth/preferencias/sinpe", json={"activo": False})
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["leer_transferencias_sinpe"] is False

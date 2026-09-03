@@ -500,3 +500,61 @@ def test_bancos_detectados_de_otro_titular_se_traduce_a_403(
     )
 
     assert respuesta.status_code == 403
+
+
+def test_transferencias_sinpe_devuelve_vacio_si_esta_apagado(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    """`leer_transferencias_sinpe` es False por default -ver el modelo Usuario."""
+    estado = _codificar_estado(usuario.id)
+    cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    )
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/transferencias-sinpe", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    assert respuesta.json() == []
+
+
+def test_transferencias_sinpe_lee_bac_y_bncr_una_vez_prendido(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion
+) -> None:
+    estado = _codificar_estado(usuario.id)
+    cliente_con_correo_falso.get(
+        "/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado}
+    )
+    usuario.leer_transferencias_sinpe = True
+    sesion.commit()
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/transferencias-sinpe", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    bancos = {t["banco"] for t in cuerpo}
+    assert bancos == {"Banco Nacional", "BAC Credomatic"}
+    for t in cuerpo:
+        assert t["monto"] is not None
+        assert t["es_confiable"] is True
+
+
+def test_transferencias_sinpe_de_otro_titular_se_traduce_a_403(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion
+) -> None:
+    otro = Usuario(
+        nombre_completo="Otra persona",
+        correo="otra-persona-sinpe@gastonomo.cr",
+        contrasena_hash="hash",
+    )
+    sesion.add(otro)
+    sesion.commit()
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/cuentas-correo/transferencias-sinpe", params={"usuario_id": otro.id}
+    )
+
+    assert respuesta.status_code == 403

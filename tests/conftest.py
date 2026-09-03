@@ -24,6 +24,7 @@ from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.main import app
 from app.presentation.dependencies import (
@@ -139,6 +140,7 @@ def cliente_con_correo_falso(
                 ProveedorCorreo.GMAIL: proveedor_correo_falso,
             },
             ComprobanteRepository(sesion),
+            TransferenciaSinpeRepository(sesion),
             _tipo_de_cambio_de_la_prueba(),
         )
 
@@ -168,6 +170,7 @@ def cliente_con_dos_buzones(cliente: TestClient, sesion: Session) -> Iterator[Te
                 ProveedorCorreo.GMAIL: ProveedorDeCorreoFalso(direccion="titular@gmail.com"),
             },
             ComprobanteRepository(sesion),
+            TransferenciaSinpeRepository(sesion),
             _tipo_de_cambio_de_la_prueba(),
         )
 

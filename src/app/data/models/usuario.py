@@ -41,6 +41,12 @@ class Usuario(Base):
     moneda_preferida: Mapped[Moneda] = mapped_column(
         Enum(Moneda), nullable=False, default=Moneda.CRC
     )
+    # Apagado por default: buscar "sinpe" en cada buzón activo es una
+    # petición real por cuenta antes de poder parsear nada, y no todo
+    # titular quiere pagar ese costo en cada carga de la pantalla SINPE.
+    # `CuentaCorreoService.transferencias_sinpe_de_usuario` respeta esta
+    # bandera antes de tocar la red.
+    leer_transferencias_sinpe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     creado_en: Mapped[datetime] = mapped_column(
         FechaHoraUTC, nullable=False, default=lambda: datetime.now(UTC)

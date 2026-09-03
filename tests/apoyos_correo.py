@@ -15,6 +15,10 @@ _CUERPOS_DE_MENSAJE = {
         encoding="utf-8"
     ),
     "2": "Aproveche nuestras ofertas de la semana en PriceSmart.",
+    "4": (Path(__file__).parent / "fixtures" / "sinpe_bncr_dtr.txt").read_text(encoding="utf-8"),
+    "5": (Path(__file__).parent / "fixtures" / "sinpe_bac_recibida.txt").read_text(
+        encoding="utf-8"
+    ),
 }
 
 
@@ -113,6 +117,21 @@ class ProveedorDeCorreoFalso:
                 remitente="avisos@bncr.fi.cr",
                 asunto="Su banco le informa",
                 recibido_en=datetime.now(UTC) - timedelta(days=1),
+            ),
+            # Los dos de abajo son para detectar_transferencias_sinpe: ninguno
+            # contiene "banco" en el asunto, así que no afectan las pruebas de
+            # detectar_bancos de más arriba.
+            MensajeResumido(
+                identificador="4",
+                remitente="bncontacto@bncr.fi.cr",
+                asunto="Transferencia SINPE DTR procesada satisfactoriamente",
+                recibido_en=datetime.now(UTC) - timedelta(days=2),
+            ),
+            MensajeResumido(
+                identificador="5",
+                remitente="notificaciones@baccredomatic.cr",
+                asunto="Notificación de Transferencia SINPE",
+                recibido_en=datetime.now(UTC) - timedelta(hours=3),
             ),
         ]
         return [m for m in mensajes if texto.lower() in m.asunto.lower()][:limite]

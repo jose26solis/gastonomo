@@ -12,6 +12,10 @@ from app.business.parsers.comprobante_bac import (
     ComprobanteParseado,
     parsear_comprobante_bac,
 )
+from app.business.parsers.transferencia_sinpe import (
+    TransferenciaSinpeParseada,
+    parsear_transferencia_sinpe,
+)
 from app.business.seguridad.cifrado import cifrar, descifrar
 from app.business.services.correo.proveedor import MensajeResumido, ProveedorDeCorreo
 from app.business.services.resumen_service import ResumenFinanciero, agrupar_por_mes
@@ -23,8 +27,11 @@ from app.business.services.tipo_cambio_service import (
 from app.data.models.comprobante import Comprobante
 from app.data.models.cuenta_correo import CuentaCorreo
 from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
+from app.data.models.transferencia_sinpe import TransferenciaSinpe
+from app.data.models.usuario import Usuario
 from app.data.repositories.comprobante_repository import ComprobanteRepository
 from app.data.repositories.cuenta_correo_repository import CuentaCorreoRepository
+from app.data.repositories.transferencia_sinpe_repository import TransferenciaSinpeRepository
 from app.data.repositories.usuario_repository import UsuarioRepository
 
 
@@ -71,6 +78,21 @@ class ComprobanteConFuente:
     # banco cobró de verdad es este.
     monto_original: Decimal | None = None
     moneda_original: str | None = None
+
+
+@dataclass(frozen=True)
+class TransferenciaSinpeConFuente:
+    """Una transferencia SINPE ya sincronizada, junto con la cuenta de la que vino.
+
+    Mismo motivo que `ComprobanteConFuente`: `transferencias_sinpe_de_usuario`
+    combina el historial de todas las cuentas activas, y sin esta etiqueta no
+    habría forma de mostrar de qué bandeja salió cada transferencia.
+    """
+
+    transferencia: TransferenciaSinpeParseada
+    cuenta_correo_id: int
+    proveedor: ProveedorCorreo
+    direccion: str
 
 
 def convertidos_a(
@@ -200,6 +222,40 @@ def _parseado_desde_fila(fila: Comprobante) -> ComprobanteParseado:
     )
 
 
+def _fila_transferencia_desde_parseada(
+    cuenta_correo_id: int, mensaje_id: str, parseada: TransferenciaSinpeParseada
+) -> TransferenciaSinpe:
+    return TransferenciaSinpe(
+        cuenta_correo_id=cuenta_correo_id,
+        mensaje_id=mensaje_id,
+        banco=parseada.banco,
+        destinatario=parseada.destinatario,
+        cuenta_destino=parseada.cuenta_destino,
+        fecha=parseada.fecha,
+        moneda=parseada.moneda,
+        monto=parseada.monto,
+        concepto=parseada.concepto,
+        referencia=parseada.referencia,
+        comprobante=parseada.comprobante,
+        confianza=parseada.confianza,
+    )
+
+
+def _transferencia_parseada_desde_fila(fila: TransferenciaSinpe) -> TransferenciaSinpeParseada:
+    return TransferenciaSinpeParseada(
+        banco=fila.banco,
+        destinatario=fila.destinatario,
+        cuenta_destino=fila.cuenta_destino,
+        fecha=fila.fecha,
+        moneda=fila.moneda,
+        monto=fila.monto,
+        concepto=fila.concepto,
+        referencia=fila.referencia,
+        comprobante=fila.comprobante,
+        confianza=fila.confianza,
+    )
+
+
 class CuentaCorreoService:
     """Aplica las reglas del dominio sobre los buzones vinculados de un titular.
 
@@ -216,12 +272,14 @@ class CuentaCorreoService:
         usuario_repository: UsuarioRepository,
         proveedores: dict[ProveedorCorreo, ProveedorDeCorreo],
         comprobante_repository: ComprobanteRepository,
+        transferencia_sinpe_repository: TransferenciaSinpeRepository,
         tipo_cambio_service: TipoCambioService | None = None,
     ) -> None:
         self.cuentas = cuenta_correo_repository
         self.usuarios = usuario_repository
         self.proveedores = proveedores
         self.comprobantes = comprobante_repository
+        self.transferencias_sinpe = transferencia_sinpe_repository
         # Opcional a propósito: sin él la sincronización funciona igual, solo
         # que los comprobantes quedan sin tipo de cambio guardado. Leer correo
         # no puede depender de que un servicio de moneda esté disponible.
@@ -391,6 +449,52 @@ class CuentaCorreoService:
         comprobantes = [c.comprobante for c in self.comprobantes_de_usuario(usuario_id, limite)]
         return ResumenFinanciero(comprobantes=comprobantes, por_mes=agrupar_por_mes(comprobantes))
 
+    def transferencias_sinpe_de_usuario(
+        self, usuario_id: int, limite: int = 100
+    ) -> list[TransferenciaSinpeConFuente]:
+        """Sincroniza y combina las transferencias SINPE de todas las cuentas activas.
+
+        Respeta `usuario.leer_transferencias_sinpe`: si está apagado -el
+        default- devuelve una lista vacía sin tocar la red en absoluto. Es
+        la misma bandera que prende el interruptor "Leer transferencias
+        SINPE" de Ajustes; buscar "sinpe" en cada buzón es una petición real
+        por cuenta, y no todo titular quiere pagar ese costo con solo abrir
+        la pantalla.
+
+        Una cuenta rota se salta en vez de tirar abajo el resto, igual que
+        `comprobantes_de_usuario`.
+        """
+        usuario = self._usuario_activo(usuario_id)
+        if not usuario.leer_transferencias_sinpe:
+            return []
+
+        cuentas_activas = [
+            c
+            for c in self.cuentas.listar_de_usuario(usuario_id)
+            if c.estado == EstadoCuentaCorreo.ACTIVA
+        ]
+
+        con_fuente: list[TransferenciaSinpeConFuente] = []
+        for cuenta in cuentas_activas:
+            try:
+                self._sincronizar_transferencias_sinpe(cuenta, limite)
+            except (ReglaDeNegocioViolada, ErrorDeProveedorExterno):
+                continue
+            for fila in self.transferencias_sinpe.listar_de_cuenta(cuenta.id):
+                con_fuente.append(
+                    TransferenciaSinpeConFuente(
+                        transferencia=_transferencia_parseada_desde_fila(fila),
+                        cuenta_correo_id=cuenta.id,
+                        proveedor=cuenta.proveedor,
+                        direccion=cuenta.direccion,
+                    )
+                )
+        con_fuente.sort(
+            key=lambda t: t.transferencia.fecha or datetime.min,
+            reverse=True,
+        )
+        return con_fuente
+
     def detectar_bancos(self, usuario_id: int, limite: int = 30) -> list[BancoDetectado]:
         """Confirma BAC y busca "banco" en el asunto de cada buzón activo del titular.
 
@@ -548,6 +652,53 @@ class CuentaCorreoService:
         self.cuentas.sesion.commit()
         return agregados
 
+    def _sincronizar_transferencias_sinpe(self, cuenta: CuentaCorreo, limite: int) -> int:
+        """Trae y guarda las notificaciones de SINPE que la caché local todavía no tiene.
+
+        Misma sincronización incremental que `_sincronizar_comprobantes`,
+        pero buscando en el asunto en vez de filtrar por un remitente exacto
+        -es la misma búsqueda de `detectar_bancos`, reusada para encontrar
+        transferencias en vez de solo remitentes.
+
+        El texto que se busca es "transferencia", no "sinpe": el asunto real
+        de BAC es "Notificación de Transferencia" -"SINPE" solo aparece en
+        el título grande de adentro del correo, nunca en el asunto- así que
+        buscar "sinpe" a secas lo dejaba afuera. El Banco Nacional sí dice
+        las dos palabras en el asunto, así que "transferencia" encuentra a
+        los dos. No colisiona con la notificación de compra de BAC, cuyo
+        asunto real es "Notificación de transacción...".
+
+        No toca `cuenta.ultima_sincronizacion`: ese campo es del sincronizado
+        de compras, que ya se muestra en otras pantallas -mezclar los dos
+        haría parecer que un buzón sin ninguna transferencia SINPE nunca se
+        sincronizó, aunque sus compras sí estén al día.
+        """
+        token_acceso = self._token_acceso_vigente(cuenta)
+        proveedor = self._proveedor(cuenta.proveedor)
+        mensajes = proveedor.buscar_por_texto(token_acceso, "transferencia", limite)
+
+        ya_guardados = self.transferencias_sinpe.mensajes_ya_sincronizados(
+            cuenta.id, [mensaje.identificador for mensaje in mensajes]
+        )
+        nuevos = [m for m in mensajes if m.identificador not in ya_guardados]
+
+        agregados = 0
+        for mensaje in nuevos:
+            try:
+                cuerpo = proveedor.obtener_cuerpo_de_mensaje(token_acceso, mensaje.identificador)
+            except ErrorDeProveedorExterno:
+                continue
+            parseada = parsear_transferencia_sinpe(mensaje.remitente, cuerpo)
+            if parseada is None:
+                continue  # Remitente sin lector todavia: no se inventa el formato.
+            self.transferencias_sinpe.agregar(
+                _fila_transferencia_desde_parseada(cuenta.id, mensaje.identificador, parseada)
+            )
+            agregados += 1
+
+        self.cuentas.sesion.commit()
+        return agregados
+
     def _tipo_de_cambio_de_hoy(self) -> TipoDeCambio | None:
         """El tipo de cambio para sellar los comprobantes que se van a guardar.
 
@@ -630,8 +781,12 @@ class CuentaCorreoService:
         return self.proveedores[proveedor]
 
     def _asegurar_usuario_activo(self, usuario_id: int) -> None:
+        self._usuario_activo(usuario_id)
+
+    def _usuario_activo(self, usuario_id: int) -> Usuario:
         usuario = self.usuarios.obtener_por_id(usuario_id)
         if usuario is None:
             raise RecursoNoEncontrado(f"El usuario {usuario_id} no existe.")
         if not usuario.activo:
             raise ReglaDeNegocioViolada(f"El usuario {usuario_id} esta desactivado.")
+        return usuario

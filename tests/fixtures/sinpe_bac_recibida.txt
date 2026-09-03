@@ -1,0 +1,8 @@
+Hola PERSONA DE PRUEBA :
+
+BAC le comunica que la transferencia SINPE en tiempo real con el número de referencia
+2026031509887766554433221, se acreditó en la cuenta IBAN
+CR2101XXXXXXXXXXXX9988 por un monto de 15,000.00 Colones, por concepto de
+Pago de prueba________.Día y hora 15/03/2026 09:15:30 a.m.
+
+Muchas gracias.

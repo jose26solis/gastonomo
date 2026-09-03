@@ -1,4 +1,5 @@
 import {
+  ArrowsLeftRight,
   Bank,
   ChartDonut,
   EnvelopeSimple,
@@ -16,6 +17,7 @@ export type Pantalla =
   | "reportes"
   | "conectar"
   | "bancos"
+  | "sinpe"
   | "ajustes";
 
 const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
@@ -25,6 +27,7 @@ const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
   { id: "reportes", label: "Reportes", icon: FileText },
   { id: "conectar", label: "Conectar correo", icon: EnvelopeSimple },
   { id: "bancos", label: "Bancos", icon: Bank },
+  { id: "sinpe", label: "SINPE", icon: ArrowsLeftRight },
   { id: "ajustes", label: "Ajustes", icon: SlidersHorizontal },
 ];
 

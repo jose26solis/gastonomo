@@ -94,6 +94,13 @@ class UsuarioResponse(BaseModel):
     moneda_preferida: Moneda
     tiene_contrasena: bool
     google_vinculado: bool
+    leer_transferencias_sinpe: bool
+
+
+class PreferenciaSinpeRequest(BaseModel):
+    """Cuerpo de POST /api/auth/preferencias/sinpe."""
+
+    activo: bool
 
 
 class SesionResponse(BaseModel):
@@ -302,6 +309,33 @@ class BancoDetectadoResponse(BaseModel):
     cuenta_correo_id: int
     proveedor: ProveedorCorreo
     direccion: str
+
+
+class TransferenciaSinpeResponse(BaseModel):
+    """Una transferencia SINPE recibida, ya leída y parseada, con la cuenta de la que salió.
+
+    Solo bancos con lector -BAC y Banco Nacional, ver
+    `business/parsers/transferencia_sinpe.py`- llegan hasta acá: un remitente
+    sin lector no se guarda ni se muestra, porque no hay forma de confirmar
+    sus campos sin adivinar el formato.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    banco: str
+    destinatario: str | None
+    cuenta_destino: str | None
+    fecha: datetime | None
+    moneda: str | None
+    monto: Decimal | None
+    concepto: str | None
+    referencia: str | None
+    comprobante: str | None
+    confianza: float
+    es_confiable: bool
+    cuenta_correo_id: int
+    proveedor: ProveedorCorreo
+    direccion_cuenta: str
 
 
 class ComercioClasificadoResponse(BaseModel):

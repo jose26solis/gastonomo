@@ -1,0 +1,7 @@
+Estimado(a): PERSONA DE PRUEBA
+El Banco Nacional le informa que la transferencia SINPE DTR realizada a la cuenta
+CR21015112345678901234 fue procesada de forma satisfactoria.
+
+La transferencia se realizó el día 15/03/2026 a las 09:12:45 AM horas; por un monto de 25,500.00 Colones, por concepto de Pago de prueba. El número de comprobante es 40404040 con número de referencia 2026031509124540404011122.
+
+Muchas gracias.

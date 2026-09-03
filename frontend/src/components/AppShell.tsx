@@ -7,6 +7,7 @@ import { ConectarCorreo } from "../pages/ConectarCorreo";
 import { Presupuestos } from "../pages/Presupuestos";
 import { Reportes } from "../pages/Reportes";
 import { Resumen } from "../pages/Resumen";
+import { Sinpe } from "../pages/Sinpe";
 import { Header } from "./Header";
 import { type Pantalla, Sidebar } from "./Sidebar";
 
@@ -17,6 +18,7 @@ const TITULOS: Record<Pantalla, [string, string]> = {
   reportes: ["Salida", "Reportes exportables"],
   conectar: ["Fuentes", "Conectar Gmail y Outlook"],
   bancos: ["Fuentes", "Bancos y cuentas"],
+  sinpe: ["Fuentes", "Transferencias SINPE"],
   ajustes: ["Cuenta", "Ajustes"],
 };
 
@@ -87,6 +89,14 @@ export function AppShell({
           {pantalla === "conectar" && <ConectarCorreo usuarioId={usuarioId} />}
           {pantalla === "bancos" && (
             <Bancos usuarioId={usuarioId} onIrAConectar={() => setPantalla("conectar")} />
+          )}
+          {pantalla === "sinpe" && (
+            <Sinpe
+              usuarioId={usuarioId}
+              usuario={usuario}
+              onActualizarUsuario={onActualizarUsuario}
+              onIrAConectar={() => setPantalla("conectar")}
+            />
           )}
           {pantalla === "ajustes" && (
             <Ajustes usuario={usuario} onActualizarUsuario={onActualizarUsuario} />
