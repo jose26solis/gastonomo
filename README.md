@@ -44,19 +44,25 @@ En números: **12 tablas · 17 llaves foráneas · 17 restricciones `UNIQUE` · 
 en PostgreSQL, más **1 colección con validador de esquema y 4 índices** en MongoDB.
 
 El **Laboratorio 1**, que sigue en el repositorio, entregó la arquitectura por capas funcionando de
-punta a punta con dos entidades (`Usuario` y `Categoria`) sobre SQLite. La aplicación **todavía usa
-SQLite**: conectarla a estas dos bases es trabajo de un laboratorio siguiente.
+punta a punta con dos entidades (`Usuario` y `Categoria`) sobre SQLite. La aplicación en ejecución
+sigue usando su propio esquema (SQLite por defecto, o PostgreSQL -ver
+[Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite)-, con tablas creadas por
+SQLAlchemy, no por Flyway): el esquema de este apartado es la entrega evaluada del Laboratorio 2,
+deliberadamente aparte.
 
 El dominio completo está diseñado y documentado en la
 [Propuesta de Dominio](docs/propuesta-dominio.md).
 
 > **Nota:** por decisión del equipo se adelantó, fuera del orden de los laboratorios, todo el
-> Proceso 2 del dominio sobre la base SQLite actual: vinculación de correo, lectura y clasificación
-> de comprobantes reales de BAC, presupuestos con estado en vivo, reportes exportables y el
-> frontend completo. Se hizo para validar contra un banco real -no contra datos inventados- que
-> todo el recorrido de punta a punta funciona. Queda descrito en la sección
+> Proceso 2 del dominio -no solo sobre la base actual de la aplicación, sino construido de verdad:
+> vinculación de correo, lectura y clasificación de comprobantes reales de BAC, la transacción
+> completa de conciliación (`Compra`, `LineaCompra`, `MetodoPago`, `ReglaCategorizacion`) con
+> presupuestos que acumulan consumo real, bitácora de trazabilidad escrita en su propia base de
+> MongoDB, reportes exportables y el frontend completo. Se hizo para validar contra un banco real
+> -no contra datos inventados- que todo el recorrido de punta a punta funciona. Queda descrito en
 > [Funcionalidades adelantadas](#funcionalidades-adelantadas-clasificación-presupuestos-y-reportes)
-> más abajo y no es parte de lo que exige el Laboratorio 2.
+> y en [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) más abajo,
+> y no es parte de lo que exige el Laboratorio 2.
 
 ---
 
@@ -140,10 +146,10 @@ la parte del sistema que va más allá de lo que exige el Laboratorio 2:
 |---|---|---|
 | Resumen financiero | Combina los comprobantes reales de BAC de **todos** los buzones vinculados y los suma por mes y moneda, sin mezclar monedas; se puede navegar a meses anteriores, y cada movimiento muestra de qué buzón salió | [`resumen_service.py`](src/app/business/services/resumen_service.py) |
 | Comercios y categorías | Normaliza el nombre del comercio, sugiere su categoría según lo que ese usuario ya clasificó antes (por usuario, no global) y deja confirmar o corregir | [`comercio_service.py`](src/app/business/services/comercio_service.py) |
-| Presupuestos | Límite mensual por categoría; el consumo se calcula en vivo contra el gasto real de ese mismo período y esa misma moneda (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`), nunca se guarda como un número aparte | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
+| Presupuestos | Límite mensual por categoría; `monto_consumido` se acumula de verdad, transacción a transacción, cada vez que una `Compra` real concilia contra esa categoría y ese período (`EN_RANGO` / `CERCA_DEL_LIMITE` / `EXCEDIDO`) -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) | [`presupuesto_service.py`](src/app/business/services/presupuesto_service.py) |
 | Reportes exportables | Movimientos en CSV y Excel, resumen del mes más reciente en PDF | [`reportes.py`](src/app/presentation/routers/reportes.py) |
 | Conversión de moneda | Equivalente en colones de un movimiento en dólares, vía el Banco Central. Por defecto es solo referencia; con el selector de moneda del Resumen, todo se convierte a una sola moneda para dar un balance único, diciendo con qué tasa | [`tipo_cambio_service.py`](src/app/business/services/tipo_cambio_service.py) |
-| Frontend completo | Siete pantallas con datos reales o marcadas explícitamente como ejemplo | ver [Correr el frontend](#correr-el-frontend) |
+| Frontend completo | Ocho pantallas con datos reales o marcadas explícitamente como ejemplo | ver [Correr el frontend](#correr-el-frontend) |
 
 Dos decisiones de dominio que valen la pena explicar:
 
@@ -152,10 +158,9 @@ Dos decisiones de dominio que valen la pena explicar:
   o "Transporte" es suyo -dos personas pueden categorizar el mismo supermercado distinto. Por eso
   existe `ComercioCategoriaSugerida` como tabla intermedia por `(usuario, comercio)`, en vez de un
   campo `categoria_sugerida` directo en `Comercio`.
-- **Un presupuesto solo guarda su límite.** `monto_consumido` y su estado se calculan en cada
-  petición combinando el límite con los comprobantes reales del período -no existe todavía un
-  proceso transaccional que vaya actualizando un consumo guardado, así que no había honestidad en
-  fingir que ese número persiste.
+- **Un presupuesto acumula su consumo de verdad, no lo recalcula.** `monto_consumido` es una
+  columna real que `ConciliacionService` va sumando conforme cada `Compra` se concilia -no un
+  número que se recomponía en cada consulta a partir de `Comprobante`. Ver la sección siguiente.
 
 ### Caché de comprobantes y sincronización incremental
 
@@ -245,6 +250,48 @@ para ver el resto del panel.
 >
 > Invocado por GET, el método devuelve el XML de los indicadores **escapado dentro** de un
 > elemento `<string xmlns="http://ws.sdde.bccr.fi.cr">`, no como documento propio.
+
+### Conciliación real y bitácora en MongoDB
+
+El dominio completo del Laboratorio 2 -`Compra`, `LineaCompra`, `MetodoPago`,
+`ReglaCategorizacion`, `TipoCambio` histórico, `CategoriaEstandar`- corre también dentro de la
+aplicación en vivo, no solo en el esquema académico que migra Flyway (ver
+[Qué incluye este laboratorio](#qué-incluye-este-laboratorio)). `Comprobante` conserva todos sus
+campos actuales tal cual -nada de lo ya construido cambió- y solo ganó una columna nueva,
+`compra_id`: la `Compra` real la crea, además, `ConciliacionService`
+([`conciliacion_service.py`](src/app/business/services/conciliacion_service.py)), que corre justo
+después de guardar cada `Comprobante` con confianza suficiente (`>= 0.75`).
+
+En una sola transacción, `ConciliacionService`:
+
+1. Empareja un `MetodoPago` del titular por sus últimos 4 dígitos -sin match, la compra queda
+   marcada `requiere_revision`; nunca se inventa un método de pago. Por eso existe la pantalla
+   **Métodos de pago** en el frontend: sin ningún método registrado, la conciliación automática no
+   tiene con qué emparejar.
+2. Resuelve el `Comercio` (reusa `ComercioService`, sin tocarlo).
+3. Categoriza: evalúa las `ReglaCategorizacion` activas del titular por prioridad ascendente contra
+   el nombre del comercio: la primera que coincide gana. Sin ninguna regla, cae a
+   `ComercioCategoriaSugerida` -el mecanismo que ya existía. Corregir la categoría de un comercio
+   después de que ya conciliaron compras suyas sin categoría las corrige retroactivamente.
+4. Crea `Compra` + `LineaCompra` (una sola línea; el desglose manual en varias queda para cuando
+   haya UI para partir un cargo).
+5. Si la moneda no es la base, guarda la tasa usada como fila histórica en `TipoCambio`.
+6. Acumula `Presupuesto.monto_consumido` de la categoría y el período afectados, y calcula si cruza
+   el umbral de alerta.
+7. Enlaza el `Comprobante` a su `Compra` (`compra_id`).
+
+Cada paso también escribe un evento en la **bitácora de trazabilidad**, en MongoDB -el mismo
+vocabulario de 13 tipos que ya definía el seed académico
+([`db/mongo/init/`](db/mongo/init/), ver [ADR-002](docs/adr/ADR-002-subdominio-documental-en-mongodb.md)),
+pero ahora escrito de verdad por la aplicación en vivo, en su propia base **`gastonomo_app`** -a
+propósito distinta de `gastonomo`, la que siembra el Laboratorio 2 con compras de ejemplo
+numeradas 1-11: compartir la misma colección mezclaría esos ids de ejemplo con el `compra_id`
+autoincremental real. Cualquier fallo de Mongo se registra en el log y nunca revierte la
+transacción de Postgres -la bitácora explica, no decide, así que un Mongo caído no debería impedir
+guardar un gasto real. `GET /api/compras/{id}/bitacora` la expone; en el frontend, cada movimiento
+del Resumen que sí concilió una compra tiene un botón que abre esa línea de tiempo completa -de
+qué correo nació, cómo se emparejó el método de pago, qué regla lo categorizó, si impactó un
+presupuesto- el diferenciador declarado del dominio.
 
 ---
 
@@ -383,6 +430,10 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/presupuestos?usuario_id=1&anio=2026&mes=9` | Lista los presupuestos guardados de un período |
 | `DELETE` | `/api/presupuestos/{id}?usuario_id=1` | Elimina un presupuesto |
 | `GET` | `/api/tipo-cambio?fecha=2026-09-02` | Tipo de cambio de referencia del colón contra el dólar (BCCR) |
+| `POST` | `/api/metodos-pago` | Registra un método de pago (alias, tipo, últimos 4 -solo débito/crédito-, entidad, día de corte -solo crédito-) |
+| `GET` | `/api/metodos-pago?usuario_id=1` | Lista los métodos de pago del titular |
+| `DELETE` | `/api/metodos-pago/{id}?usuario_id=1` | Desactiva un método de pago (no lo borra: una `Compra` ya conciliada sigue apuntándolo) |
+| `GET` | `/api/compras/{id}/bitacora?usuario_id=1` | La trazabilidad completa de una `Compra` real: de qué correo nació, cómo se emparejó el método de pago, qué regla la categorizó, si impactó un presupuesto -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) más abajo |
 
 `/api/salud` y los tres de `/api/auth` no necesitan sesión. **Todo lo demás sí**: hace falta el
 encabezado `Authorization: Bearer <token>` de una sesión iniciada como el mismo `usuario_id` que se
@@ -404,7 +455,23 @@ ruff check . && ruff format --check .
 ```
 
 Son los mismos comandos que ejecuta la integración continua. Las pruebas corren contra una base
-SQLite **en memoria**, así que no tocan ningún archivo ni necesitan infraestructura.
+SQLite **en memoria**, así que no tocan ningún archivo ni necesitan infraestructura. Son 305 en
+total (`pytest -q` al final del proyecto).
+
+El frontend tiene su propia suite, con Vitest + Testing Library (`cd frontend`):
+
+```bash
+npm run test
+```
+
+```bash
+npx tsc -b && npm run lint
+```
+
+39 pruebas: funciones puras de `lib/formato.ts`, `api.ts` con `fetch` mockeado (URL, encabezados,
+traducción de errores), los hooks `useSesion`/`useCuentaActiva`, y componentes de pantalla completos
+(`Bancos.tsx` en sus tres estados, el CRUD de `MetodosPago.tsx`) contra un doble de `api`, sin tocar
+la red. También corre en CI, junto a `pytest`.
 
 ---
 
@@ -417,13 +484,15 @@ Arquitectura en tres capas más configuración. La regla de oro:
 src/app/
 ├── presentation/   → Habla HTTP. Recibe JSON, llama al servicio, devuelve JSON.
 │   ├── routers/        salud.py · categorias.py · cuentas_correo.py · comercios.py ·
-│   │                   presupuestos.py · reportes.py
+│   │                   presupuestos.py · reportes.py · metodos_pago.py · compras.py
 │   ├── schemas.py      DTOs de entrada y salida
 │   └── dependencies.py arma los servicios con sus repositorios
 │
 ├── business/       → Reglas del negocio. No sabe que existe HTTP.
 │   ├── services/        categoria_service.py · cuenta_correo_service.py ·
-│   │                    comercio_service.py · presupuesto_service.py · resumen_service.py
+│   │                    comercio_service.py · presupuesto_service.py · resumen_service.py ·
+│   │                    metodo_pago_service.py · conciliacion_service.py · compra_service.py ·
+│   │                    bitacora_service.py (escribe en MongoDB)
 │   │   └── correo/      proveedor.py · outlook.py · gmail.py (hablan con Microsoft/Google)
 │   ├── parsers/          comprobante_bac.py (lee notificaciones de BAC con regex)
 │   ├── seguridad/        cifrado.py (cifra los tokens antes de guardarlos)
@@ -432,13 +501,15 @@ src/app/
 ├── data/           → Entidades y consultas. No contiene reglas de negocio.
 │   ├── models/          usuario.py · categoria.py · cuenta_correo.py · comercio.py ·
 │   │                    comercio_categoria_sugerida.py · presupuesto.py · comprobante.py ·
-│   │                    base.py · enums.py · tipos.py
+│   │                    compra.py · linea_compra.py · metodo_pago.py · regla_categorizacion.py ·
+│   │                    tipo_cambio.py · categoria_estandar.py · base.py · enums.py · tipos.py
 │   └── repositories/    el único lugar del sistema que consulta datos
 │
 ├── config/         → Lo que cambia entre máquinas.
-│   ├── settings.py      nombre, versión, URL de la base, credenciales OAuth
+│   ├── settings.py      nombre, versión, URL de la base, credenciales OAuth, Mongo
 │   ├── database.py      motor, sesión y creación de tablas
-│   └── cliente_http.py  cliente HTTP compartido hacia Microsoft/Google
+│   ├── cliente_http.py  cliente HTTP compartido hacia Microsoft/Google
+│   └── cliente_mongo.py cliente Mongo compartido hacia `gastonomo_app` (ver más abajo)
 │
 └── main.py         → Arma la app, CORS, y traduce errores de negocio a códigos HTTP.
 ```
@@ -614,6 +685,7 @@ vinculado, estas pantallas quedan disponibles:
 | **Conectar correo** | Vincular o desvincular Outlook y Gmail |
 | **Bancos** | Busca "banco" de verdad en los buzones vinculados y agrupa por dominio del remitente; BAC aparece "Conectado" (tiene parser), el resto queda marcado como candidato sin soporte todavía |
 | **SINPE** | Transferencias SINPE recibidas, reales; BAC y Banco Nacional con lector exacto, cualquier otro banco detectado automáticamente con patrones generales y marcado "Sin confirmar". Apagada por default -se prende desde acá o desde Ajustes |
+| **Métodos de pago** | CRUD real de los métodos del titular -sin esto, la conciliación automática no tiene con qué emparejar los últimos 4 dígitos de un comprobante. Cada movimiento del Resumen que concilió una compra real tiene un botón que abre su bitácora completa -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) |
 | **Ajustes** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
 
 Cada comprobante de BAC se lee y se guarda una sola vez -ver
@@ -784,25 +856,41 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
       nada útil que extraer ni siquiera llega a guardarse. Pestaña SINPE nueva, conectada al
       interruptor "Leer transferencias SINPE" de Ajustes -apagado por default, porque sincronizar
       es una petición real por buzón.
+- [x] **Conciliación real y bitácora en MongoDB** *(adelantado)* — el dominio completo del
+      Laboratorio 2 (`Compra`, `LineaCompra`, `MetodoPago`, `ReglaCategorizacion`) corre también
+      dentro de la app en vivo: cada comprobante confiable concilia una `Compra` real en una sola
+      transacción, `Presupuesto.monto_consumido` se acumula de verdad en vez de recalcularse, y
+      cada paso queda escrito en MongoDB. Ver
+      [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb).
+- [x] **Pantalla Métodos de pago y panel de bitácora** *(adelantado)* — CRUD de métodos de pago
+      (sin el cual la conciliación no tiene con qué emparejar últimos 4 dígitos) y un panel
+      deslizable en el Resumen con la línea de tiempo completa de cada compra conciliada.
+- [x] **Pruebas automatizadas de frontend** *(adelantado)* — Vitest + Testing Library, 39 pruebas
+      contra `lib/formato.ts`, `api.ts`, los hooks de sesión y dos pantallas completas. Ver
+      [Correr las pruebas y el linter](#5-correr-las-pruebas-y-el-linter).
 
 Pendiente:
 
-- [ ] Conectar la aplicación a MongoDB para lo que corresponda al subdominio documental
+- [x] Conectar la aplicación a MongoDB para lo que corresponda al subdominio documental -ver
+      [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb)
 - [x] Vinculación de Gmail en el frontend, de punta a punta contra una cuenta real de Google
 - [ ] Sumar otros bancos además de BAC a las compras -contra una notificación real de cada uno,
       igual que siempre. Para transferencias SINPE ya hay un lector genérico que cubre cualquier
       banco de forma aproximada (ver arriba); un lector exacto validado para otro banco puntual
       sigue pendiente de una notificación real de ese banco
-- [ ] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
+- [x] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
-      `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
+      `Comprobante` -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb)
 - [x] Registro e inicio de sesión reales -ver [Registro y varios usuarios](#registro-y-varios-usuarios) más abajo
 - [x] Iniciar sesión con Google, y cambiar/poner contraseña ya logueado -ver
       [Registro y varios usuarios](#registro-y-varios-usuarios)
 - [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
 - [ ] Recuperar una contraseña olvidada -hoy hace falta estar logueado para cambiarla; si no hay
       ninguna sesión con ese correo, no hay forma de recuperar el acceso
-- [ ] Pruebas automatizadas de frontend (el backend tiene 257 pruebas; el frontend, ninguna todavía)
+- [x] Pruebas automatizadas de frontend -ver [Correr las pruebas y el linter](#5-correr-las-pruebas-y-el-linter)
+- [ ] Desglose manual de una compra en varias líneas -`LineaCompra` ya soporta varias por `Compra`
+      en el modelo, pero todavía no hay pantalla para partir un cargo; toda compra ingerida por
+      correo nace con una sola línea
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta
