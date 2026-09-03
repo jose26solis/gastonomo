@@ -38,6 +38,9 @@ export function AppShell({
   const usuarioId = usuario.id;
   const [sincronizando, setSincronizando] = useState(false);
   const [lineaEstado, setLineaEstado] = useState("Sin buzones vinculados todavía");
+  // Solo importa en pantallas angostas -en el escritorio el CSS ignora este
+  // estado y el sidebar siempre está visible (ver `.sidebar` en index.css).
+  const [menuAbierto, setMenuAbierto] = useState(false);
 
   const [kicker, titulo] = TITULOS[pantalla];
 
@@ -48,9 +51,17 @@ export function AppShell({
         onNavegar={setPantalla}
         lineaEstado={lineaEstado}
         sincronizando={sincronizando}
+        abierto={menuAbierto}
+        onCerrar={() => setMenuAbierto(false)}
       />
       <div className="app-main">
-        <Header kicker={kicker} titulo={titulo} usuario={usuario} onCerrarSesion={onCerrarSesion} />
+        <Header
+          kicker={kicker}
+          titulo={titulo}
+          usuario={usuario}
+          onCerrarSesion={onCerrarSesion}
+          onAbrirMenu={() => setMenuAbierto(true)}
+        />
         <div className="app-content">
           {pantalla === "resumen" && (
             <Resumen

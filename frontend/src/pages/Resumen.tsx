@@ -421,7 +421,7 @@ export function Resumen({
         </p>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: "1.35fr 1fr" }}>
+      <div className="grid grid-tendencia">
         <TendenciaMensual tendencia={datos.tendencia} />
         <PorComercio topComercios={datos.topComercios} totalMes={datos.totalMes} moneda={datos.mesActual.moneda} />
       </div>

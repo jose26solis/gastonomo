@@ -1,15 +1,20 @@
 import { AppShell } from "./components/AppShell";
 import { useSesion } from "./lib/useSesion";
 import { CallbackVinculacion } from "./pages/CallbackVinculacion";
+import { PoliticaDePrivacidad } from "./pages/legal/PoliticaDePrivacidad";
+import { TerminosDeUso } from "./pages/legal/TerminosDeUso";
 import { Login } from "./pages/Login";
 
 /**
  * Enrutamiento manual por `pathname`.
  *
- * Solo hay tres rutas de verdad -el resto de la navegación es estado de
- * React dentro de `AppShell`, no URLs- y ninguna necesita parámetros ni
- * historial propio: agregar `react-router` para esto sería una dependencia
- * entera para reemplazar tres líneas de `if`.
+ * No todas las rutas necesitan sesión iniciada -al revés, /privacidad y
+ * /terminos tienen que funcionar SIN login: es lo que exige la verificación
+ * de apps de Google y lo que las tiendas revisan antes de publicar la ficha.
+ * Por eso se resuelven antes de mirar si hay usuario. El resto de la
+ * navegación es estado de React dentro de `AppShell`, no URLs -agregar
+ * `react-router` para esto sería una dependencia entera para reemplazar un
+ * puñado de líneas de `if`.
  */
 export function App() {
   const { pathname } = window.location;
@@ -20,6 +25,12 @@ export function App() {
   }
   if (pathname === "/vincular/gmail/callback") {
     return <CallbackVinculacion proveedor="GMAIL" />;
+  }
+  if (pathname === "/privacidad") {
+    return <PoliticaDePrivacidad />;
+  }
+  if (pathname === "/terminos") {
+    return <TerminosDeUso />;
   }
 
   if (cargando) {

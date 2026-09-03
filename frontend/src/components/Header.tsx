@@ -1,4 +1,4 @@
-import { SignOut } from "@phosphor-icons/react";
+import { List, SignOut } from "@phosphor-icons/react";
 import type { Usuario } from "../types";
 
 export function Header({
@@ -6,12 +6,17 @@ export function Header({
   titulo,
   usuario,
   onCerrarSesion,
+  onAbrirMenu,
   acciones,
 }: {
   kicker: string;
   titulo: string;
   usuario: Usuario;
   onCerrarSesion: () => void;
+  /** Solo se ve en pantallas angostas -en el escritorio el sidebar ya está
+   * siempre visible y no hace falta un botón para abrirlo (ver `.hamburger`
+   * en index.css, oculto por defecto). */
+  onAbrirMenu: () => void;
   acciones?: React.ReactNode;
 }) {
   return (
@@ -19,7 +24,7 @@ export function Header({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 17,
+        gap: 14,
         padding: "17px 22px",
         borderBottom: "1px solid var(--color-border)",
         position: "sticky",
@@ -28,6 +33,25 @@ export function Header({
         zIndex: 5,
       }}
     >
+      <button
+        className="hamburger"
+        onClick={onAbrirMenu}
+        aria-label="Abrir menú"
+        style={{
+          background: "transparent",
+          border: "1px solid var(--color-border)",
+          borderRadius: 6,
+          color: "var(--color-text-bright-muted)",
+          cursor: "pointer",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 7,
+          flex: "0 0 auto",
+        }}
+      >
+        <List size={15} />
+      </button>
+
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="kicker">{kicker}</div>
         <h1 className="screen-title">{titulo}</h1>

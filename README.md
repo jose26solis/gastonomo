@@ -576,6 +576,101 @@ son casi instantáneas.
 
 ---
 
+## Camino a publicar en App Store y Play Store
+
+La app está preparada para empaquetarse como app nativa y venderse, pero publicarla de verdad
+necesita varios trámites que son tuyos -tu identidad, tu tarjeta, tus cuentas de desarrollador- y
+no se pueden automatizar desde acá. Esta sección es el mapa completo: qué ya está hecho, y qué
+falta y en qué orden.
+
+### El enfoque: envolver la web, no reescribirla
+
+La app móvil no es un proyecto aparte -es este mismo frontend de React, empaquetado con
+[Capacitor](https://capacitorjs.com/) en un shell nativo real para cada tienda. `npm run build`
+genera el mismo `dist/` que ya sirve Vite; Capacitor lo copia dentro de un proyecto de Android (y,
+en una Mac, de iOS) y lo corre ahí. Cualquier pantalla nueva o corregida en `frontend/src/` llega
+a la app móvil con `npm run cap:sync`, sin duplicar una sola línea.
+
+### Lo que ya está hecho
+
+| Qué | Dónde |
+|---|---|
+| Interfaz responsiva de verdad -el sidebar es un cajón deslizable en pantallas angostas, las grillas colapsan a una columna, nada desborda- verificado en un viewport de 375px | [`Sidebar.tsx`](frontend/src/components/Sidebar.tsx), [`index.css`](frontend/src/index.css) |
+| Manifest de PWA, íconos en todos los tamaños que piden iOS/Android/favicon, metatags de instalación | [`manifest.webmanifest`](frontend/public/manifest.webmanifest), [`index.html`](frontend/index.html) |
+| Política de privacidad y Términos de uso reales, accesibles sin sesión -exigidos por la verificación de OAuth de Google y por la revisión de las dos tiendas | `/privacidad` y `/terminos` ([`pages/legal/`](frontend/src/pages/legal/)) |
+| Proyecto de Android generado y sincronizado, con sus propios íconos adaptativos y splash screen | [`capacitor.config.ts`](frontend/capacitor.config.ts), `frontend/android/` |
+
+### Lo que falta, en orden
+
+**1. Cuentas de desarrollador** *(tuyas, con tu identidad y tu tarjeta -no las puedo crear)*
+
+- [Apple Developer Program](https://developer.apple.com/programs/): USD 99/año. Para publicar en
+  iOS hace falta además una Mac con Xcode -no se puede compilar ni firmar un `.ipa` desde Windows.
+- [Google Play Console](https://play.google.com/console/): USD 25, pago único.
+
+**2. Hosting en producción** *(el backend hoy corre en tu máquina, con SQLite o con el Postgres de
+Docker Compose -nada de eso sirve para una app pública)*
+
+- Elegir dónde vive el backend + Postgres (Railway, Render y Fly.io son las opciones más simples
+  para un FastAPI chico; cualquiera con HTTPS incluido sirve).
+- Un dominio real con HTTPS -Google exige HTTPS para el `redirect_uri` de producción, y Apple/Google
+  rechazan una app que hable con un backend sin cifrar.
+- Cambiar `VITE_API_URL` (frontend) a esa URL real antes de `npm run build`, y agregar el origen de
+  la app nativa (`capacitor://localhost` en iOS, `http://localhost` en Android -así es como
+  Capacitor identifica el origen de la webview) a `GASTONOMO_ORIGENES_PERMITIDOS` en el backend.
+- Mover `GASTONOMO_CLAVE_CIFRADO_TOKENS` a un secreto real del hosting elegido -hoy puede arrancar
+  con una clave efímera de desarrollo si no está seteada, lo cual está bien en local y sería un
+  error grave en producción (los tokens cifrados no sobrevivirían un reinicio).
+
+**3. Verificación de OAuth** *(sin esto, cualquiera que no seas vos ve una pantalla de advertencia
+de Google/Microsoft al intentar vincular su correo, o directamente no puede)*
+
+- **Google:** la app pide `gmail.readonly`, un scope "sensible". Hace falta enviarla a
+  [verificación](https://support.google.com/cloud/answer/13463073) con la política de privacidad ya
+  publicada (`/privacidad`, ver arriba), puede pedir un video mostrando el flujo de consentimiento,
+  y Google la revisa -típicamente unas pocas semanas. Mientras tanto, la app sigue funcionando en
+  modo "Testing" solo para los correos que agregues a mano como usuarios de prueba (ver
+  [Registrar las apps](#registrar-las-apps-una-sola-vez-por-integrante) más abajo).
+- **Microsoft:** el registro actual es de un solo tenant (`common`, ver
+  [Por qué el frontend es dueño del redirect_uri](#por-qué-el-frontend-es-dueño-del-redirect_uri)).
+  Para una app pública conviene registrar el `redirect_uri` de producción y revisar el estado de
+  verificación del publicador en Azure AD.
+- En los dos casos, actualizar el `redirect_uri` registrado para que apunte al dominio de
+  producción, no a `localhost`.
+
+**4. Identidad de la app en las tiendas**
+
+- Cambiar `appId` en [`capacitor.config.ts`](frontend/capacitor.config.ts) -hoy es
+  `com.gastonomo.app`, un valor de relleno- por el identificador real que registrés en cada
+  consola. Cambiarlo después de la primera publicación obliga a subir la app como una ficha nueva,
+  no como una actualización, así que conviene decidirlo antes de publicar la primera vez.
+- Si cambia el nombre o los colores de marca, regenerar los íconos:
+  `npx @capacitor/assets generate` lee `frontend/assets/icon.png` (el ícono maestro de 1024×1024)
+  y genera todos los tamaños de nuevo para Android (y para iOS, una vez que exista ese proyecto).
+
+**5. Compilar, firmar y subir**
+
+- **Android:** `npm run cap:android` abre el proyecto en Android Studio (necesita el Android SDK
+  instalado -no viene con Capacitor). Generás ahí el `.aab` firmado con tu propia keystore y lo
+  subís a Play Console.
+- **iOS:** en una Mac, `npx cap add ios` agrega el proyecto (no se pudo generar en este ambiente
+  Windows); `npx cap open ios` lo abre en Xcode para firmar con tu cuenta de Apple Developer y
+  subir a App Store Connect.
+- Cada tienda pide capturas de pantalla reales en tamaños específicos, una descripción, una
+  categoría, y un cuestionario de clasificación de contenido y de manejo de datos ("Data safety" en
+  Play, "App Privacy" en App Store) -ahí es donde la Política de privacidad de arriba responde
+  directamente las preguntas que piden.
+
+### Sobre cobrar por la app
+
+Esta ronda dejó la base lista -hosting multi-usuario, política de privacidad, términos de uso- pero
+**sin cobros integrados todavía**, a propósito: activar pagos de verdad significa abrir una cuenta
+de Stripe o configurar las suscripciones de RevenueCat/App Store/Play Store con tu identidad fiscal
+real, y ninguna de esas cuentas se puede crear por vos. El código para integrarlo, una vez que esas
+cuentas existan, es un paso aparte y bien acotado -avisá cuando quieras encararlo.
+
+---
+
 ## Documentación
 
 | Documento | Qué contiene |
@@ -630,6 +725,9 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
 - [x] **Conversión de moneda de referencia** *(adelantado)* — equivalente aproximado en colones de
       un movimiento en dólares, vía el Banco Central. Ver
       [Conversión de moneda](#conversión-de-moneda-banco-central-de-costa-rica).
+- [x] **Interfaz responsiva y proyecto móvil (Capacitor)** *(adelantado)* — el mismo frontend
+      empaquetado para Android/iOS, íconos, manifest de PWA, política de privacidad y términos de
+      uso reales. Ver [Camino a publicar en App Store y Play Store](#camino-a-publicar-en-app-store-y-play-store).
 
 Pendiente:
 
@@ -648,3 +746,9 @@ Pendiente:
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta
       a punta: al escribirse esto el subsistema `gee.bccr.fi.cr/Indicadores/` llevaba días
       devolviendo `HTTP 503` y no se pudo ni completar la suscripción
+- [ ] Publicar de verdad en App Store y Play Store -la base técnica ya está (ver arriba), pero
+      faltan las cuentas de desarrollador, el hosting en producción, la verificación de OAuth y
+      compilar/firmar cada app, que son trámites del titular del proyecto, no del código. Ver
+      [Camino a publicar en App Store y Play Store](#camino-a-publicar-en-app-store-y-play-store).
+- [ ] Cobros reales (suscripción u otro modelo) -a propósito, no se integró todavía: necesita
+      cuentas de pago (Stripe, RevenueCat) con identidad fiscal real

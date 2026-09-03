@@ -97,6 +97,59 @@ button {
   min-height: 100vh;
 }
 
+/* ---------- Sidebar / cajón en móvil ---------- */
+
+.sidebar {
+  width: 224px;
+  flex: 0 0 224px;
+  border-right: 1px solid var(--color-border);
+  padding: 22px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  background: var(--color-bg);
+  z-index: 30;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+.hamburger {
+  display: none;
+}
+
+/* Por debajo de esto no hay espacio para una columna fija de 224px -el
+   sidebar pasa a ser un cajón que se desliza sobre el contenido, como en
+   cualquier app de teléfono. */
+@media (max-width: 860px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 260px;
+    flex-basis: auto;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 24px 0 48px rgba(0, 0, 0, 0.45);
+  }
+  .sidebar.abierto {
+    transform: translateX(0);
+  }
+  .sidebar-backdrop.visible {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 25;
+  }
+  .hamburger {
+    display: inline-flex;
+  }
+}
+
 .app-main {
   flex: 1;
   min-width: 0;
@@ -320,10 +373,15 @@ button {
   }
 }
 
+.grid-tendencia {
+  grid-template-columns: 1.35fr 1fr;
+}
+
 @media (max-width: 720px) {
   .grid-4,
   .grid-3,
-  .grid-2 {
+  .grid-2,
+  .grid-tendencia {
     grid-template-columns: 1fr;
   }
 }

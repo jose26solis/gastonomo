@@ -33,28 +33,36 @@ export function Sidebar({
   onNavegar,
   lineaEstado,
   sincronizando,
+  abierto,
+  onCerrar,
 }: {
   pantalla: Pantalla;
   onNavegar: (p: Pantalla) => void;
   lineaEstado: string;
   sincronizando: boolean;
+  /** En pantallas angostas el sidebar es un cajón deslizable, no una columna
+   * fija -no hay espacio para 224px fijos en un teléfono. `abierto` controla
+   * si está desplegado; en pantallas anchas este valor no importa, el CSS lo
+   * ignora (ver `.sidebar` en index.css). */
+  abierto: boolean;
+  onCerrar: () => void;
 }) {
+  function navegarYCerrar(p: Pantalla) {
+    onNavegar(p);
+    onCerrar();
+  }
+
   return (
-    <aside
-      style={{
-        width: 224,
-        flex: "0 0 224px",
-        borderRight: "1px solid var(--color-border)",
-        padding: "22px 11px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 22,
-        position: "sticky",
-        top: 0,
-        height: "100vh",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px" }}>
+    <>
+      {/* Solo se ve (y solo existe como capa clicable) en pantallas angostas
+          con el cajón abierto -es lo que permite cerrarlo tocando afuera. */}
+      <div
+        className={`sidebar-backdrop${abierto ? " visible" : ""}`}
+        onClick={onCerrar}
+        aria-hidden="true"
+      />
+      <aside className={`sidebar${abierto ? " abierto" : ""}`}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px" }}>
         <div
           style={{
             width: 26,
@@ -78,7 +86,7 @@ export function Sidebar({
           return (
             <button
               key={item.id}
-              onClick={() => onNavegar(item.id)}
+              onClick={() => navegarYCerrar(item.id)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -138,6 +146,7 @@ export function Sidebar({
           </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

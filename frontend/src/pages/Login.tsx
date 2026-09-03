@@ -60,7 +60,7 @@ export function Login({
         padding: 24,
       }}
     >
-      <div className="card stack" style={{ width: 360, gap: 17 }}>
+      <div className="card stack" style={{ width: "100%", maxWidth: 360, gap: 17 }}>
         <div>
           <div className="section-title" style={{ fontSize: 15 }}>
             Gastonomo
@@ -145,6 +145,20 @@ export function Login({
             ? "¿Ya tenés cuenta? Iniciá sesión"
             : "¿Todavía no tenés cuenta? Registrate"}
         </button>
+
+        {modo === "registro" && (
+          <p style={{ fontSize: 10.5, color: "var(--color-text-dim)", margin: 0, lineHeight: 1.6 }}>
+            Al crear una cuenta aceptás los{" "}
+            <a href="/terminos" style={{ color: "var(--color-text-dim)" }}>
+              Términos de uso
+            </a>{" "}
+            y la{" "}
+            <a href="/privacidad" style={{ color: "var(--color-text-dim)" }}>
+              Política de privacidad
+            </a>
+            .
+          </p>
+        )}
       </div>
     </div>
   );
