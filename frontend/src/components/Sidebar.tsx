@@ -2,6 +2,7 @@ import {
   ArrowsLeftRight,
   Bank,
   ChartDonut,
+  CreditCard,
   EnvelopeSimple,
   FileText,
   Gauge,
@@ -18,6 +19,7 @@ export type Pantalla =
   | "conectar"
   | "bancos"
   | "sinpe"
+  | "metodos-pago"
   | "ajustes";
 
 const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
@@ -28,6 +30,7 @@ const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
   { id: "conectar", label: "Conectar correo", icon: EnvelopeSimple },
   { id: "bancos", label: "Bancos", icon: Bank },
   { id: "sinpe", label: "SINPE", icon: ArrowsLeftRight },
+  { id: "metodos-pago", label: "Métodos de pago", icon: CreditCard },
   { id: "ajustes", label: "Ajustes", icon: SlidersHorizontal },
 ];
 

@@ -29,3 +29,11 @@ export function formatearFechaCorta(iso: string): string {
   const fecha = new Date(iso);
   return `${fecha.getDate()} ${NOMBRES_MES[fecha.getMonth()]}`;
 }
+
+/** `"2026-08-30T13:27:00Z"` -> `"30 ago, 07:27 a. m."`. Para la bitácora de
+ * una compra, donde el orden de los eventos importa tanto como el día. */
+export function formatearFechaHora(iso: string): string {
+  const fecha = new Date(iso);
+  const hora = fecha.toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit" });
+  return `${fecha.getDate()} ${NOMBRES_MES[fecha.getMonth()]}, ${hora}`;
+}

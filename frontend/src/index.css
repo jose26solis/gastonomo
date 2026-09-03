@@ -118,6 +118,31 @@ button {
   display: none;
 }
 
+/* ---------- Panel deslizable (bitácora de una compra) ---------- */
+/* A diferencia del sidebar -que solo se vuelve cajón en móvil- este panel
+   siempre se desliza sobre el contenido, en cualquier tamaño de pantalla:
+   no forma parte del layout fijo de la app, se abre puntualmente sobre un
+   movimiento y se cierra sin dejar rastro. */
+
+.panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 35;
+}
+
+.panel-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: 360px;
+  max-width: 92vw;
+  background: var(--color-bg);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -24px 0 48px rgba(0, 0, 0, 0.45);
+  z-index: 40;
+  overflow-y: auto;
+}
+
 .hamburger {
   display: none;
 }

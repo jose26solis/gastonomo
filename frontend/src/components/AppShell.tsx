@@ -4,6 +4,7 @@ import { Ajustes } from "../pages/Ajustes";
 import { Bancos } from "../pages/Bancos";
 import { Categorias } from "../pages/Categorias";
 import { ConectarCorreo } from "../pages/ConectarCorreo";
+import { MetodosPago } from "../pages/MetodosPago";
 import { Presupuestos } from "../pages/Presupuestos";
 import { Reportes } from "../pages/Reportes";
 import { Resumen } from "../pages/Resumen";
@@ -19,6 +20,7 @@ const TITULOS: Record<Pantalla, [string, string]> = {
   conectar: ["Fuentes", "Conectar Gmail y Outlook"],
   bancos: ["Fuentes", "Bancos y cuentas"],
   sinpe: ["Fuentes", "Transferencias SINPE"],
+  "metodos-pago": ["Fuentes", "Métodos de pago"],
   ajustes: ["Cuenta", "Ajustes"],
 };
 
@@ -98,6 +100,7 @@ export function AppShell({
               onIrAConectar={() => setPantalla("conectar")}
             />
           )}
+          {pantalla === "metodos-pago" && <MetodosPago usuarioId={usuarioId} />}
           {pantalla === "ajustes" && (
             <Ajustes usuario={usuario} onActualizarUsuario={onActualizarUsuario} />
           )}

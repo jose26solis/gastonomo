@@ -14,13 +14,16 @@ import type {
   CuentaCorreo,
   ErrorDeApi,
   EstadoDePresupuesto,
+  EventoBitacora,
   IniciarVinculacionResponse,
   MensajeResumido,
+  MetodoPago,
   Presupuesto,
   Proveedor,
   Sesion,
   ResumenFinancieroConFuente,
   TipoDeCambio,
+  TipoMetodoPago,
   TransferenciaSinpe,
   UrlDeAutorizacion,
   Usuario,
@@ -377,6 +380,53 @@ export const api = {
       `/api/cuentas-correo/reportes/resumen.pdf?usuario_id=${usuarioId}`,
       "gastonomo-reporte.pdf",
     );
+  },
+
+  // ---- Métodos de pago ----
+
+  /** Sin esto la conciliación automática nunca tiene con qué emparejar los
+   * últimos 4 dígitos que trae un comprobante -ver ConciliacionService. */
+  crearMetodoPago(datos: {
+    usuarioId: number;
+    alias: string;
+    tipo: TipoMetodoPago;
+    moneda: string;
+    ultimosCuatro?: string;
+    entidad?: string;
+    diaCorte?: number;
+  }): Promise<MetodoPago> {
+    return peticion("/api/metodos-pago", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario_id: datos.usuarioId,
+        alias: datos.alias,
+        tipo: datos.tipo,
+        moneda: datos.moneda,
+        ultimos_cuatro: datos.ultimosCuatro ?? null,
+        entidad: datos.entidad ?? null,
+        dia_corte: datos.diaCorte ?? null,
+      }),
+    });
+  },
+
+  listarMetodosPago(usuarioId: number): Promise<MetodoPago[]> {
+    return peticion(`/api/metodos-pago?usuario_id=${usuarioId}`);
+  },
+
+  desactivarMetodoPago(usuarioId: number, metodoPagoId: number): Promise<MetodoPago> {
+    return peticion(`/api/metodos-pago/${metodoPagoId}?usuario_id=${usuarioId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ---- Bitácora de compras ----
+
+  /** La trazabilidad completa de una compra: de qué correo nació y cómo se
+   * clasificó. 404 si la compra no existe, no es del titular, o no concilió
+   * -ver la nota de `compra_id` en `ComprobanteConFuente`. */
+  bitacoraDeCompra(usuarioId: number, compraId: number): Promise<EventoBitacora[]> {
+    return peticion(`/api/compras/${compraId}/bitacora?usuario_id=${usuarioId}`);
   },
 
   // ---- Tipo de cambio ----

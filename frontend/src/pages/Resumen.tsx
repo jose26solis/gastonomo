@@ -1,6 +1,14 @@
-import { ArrowDownRight, ArrowUpRight, EnvelopeSimple, Minus, Storefront } from "@phosphor-icons/react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Clock,
+  EnvelopeSimple,
+  Minus,
+  Storefront,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ErrorDeApiError } from "../api";
+import { PanelBitacora } from "../components/PanelBitacora";
 import { formatearFechaCorta, formatearMes, formatearMonto } from "../lib/formato";
 import type {
   ComprobanteConFuente,
@@ -61,6 +69,11 @@ export function Resumen({
   // honesto por defecto). Con "CRC" o "USD", el backend pasa todo a esa
   // moneda para poder dar un balance único.
   const [monedaUnica, setMonedaUnica] = useState<"" | "CRC" | "USD">("");
+  // La compra cuya bitácora se está mostrando en el panel deslizable, si
+  // hay alguna abierta. `null` = panel cerrado.
+  const [bitacoraAbierta, setBitacoraAbierta] = useState<{ compraId: number; titulo: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelado = false;
@@ -445,7 +458,17 @@ export function Resumen({
       <MovimientosRecientes
         movimientos={datos.movimientosRecientes}
         tipoDeCambio={monedaUnica ? null : tipoDeCambio}
+        onVerBitacora={(compraId, titulo) => setBitacoraAbierta({ compraId, titulo })}
       />
+
+      {bitacoraAbierta && (
+        <PanelBitacora
+          usuarioId={usuarioId}
+          compraId={bitacoraAbierta.compraId}
+          titulo={bitacoraAbierta.titulo}
+          onCerrar={() => setBitacoraAbierta(null)}
+        />
+      )}
     </div>
   );
 }
@@ -761,9 +784,11 @@ function EtiquetaFuente({ proveedor }: { proveedor: string }) {
 function MovimientosRecientes({
   movimientos,
   tipoDeCambio,
+  onVerBitacora,
 }: {
   movimientos: ComprobanteConFuente[];
   tipoDeCambio: TipoDeCambio | null;
+  onVerBitacora: (compraId: number, titulo: string) => void;
 }) {
   return (
     <section className="card card--tight">
@@ -796,7 +821,7 @@ function MovimientosRecientes({
                 key={`${m.autorizacion}-${i}`}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "30px 1.6fr 1fr 130px",
+                  gridTemplateColumns: "30px 1.6fr 1fr 130px 26px",
                   alignItems: "center",
                   gap: 11,
                   padding: "11px 17px",
@@ -840,6 +865,24 @@ function MovimientosRecientes({
                     </span>
                   )}
                 </span>
+                {m.compra_id !== null ? (
+                  <button
+                    className="btn btn-sm"
+                    title="Ver de dónde salió este movimiento"
+                    aria-label="Ver bitácora de este movimiento"
+                    onClick={() =>
+                      onVerBitacora(
+                        m.compra_id!,
+                        `${m.comercio ?? "Sin identificar"} · ${formatearMonto(-Number(m.monto), m.moneda!)}`,
+                      )
+                    }
+                    style={{ padding: 5, justifySelf: "end" }}
+                  >
+                    <Clock size={12} />
+                  </button>
+                ) : (
+                  <span />
+                )}
               </div>
             );
           })}

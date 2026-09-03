@@ -76,6 +76,10 @@ export interface ComprobanteConFuente extends ComprobanteParseado {
   moneda_original: string | null;
   /** De qué día es la tasa con la que se convirtió este movimiento. */
   tipo_cambio_fecha: string | null;
+  /** La Compra real que se concilió a partir de este movimiento -con esto se
+   * puede pedir `api.bitacoraDeCompra`. `null` si la confianza del parseo no
+   * alcanzó para conciliar. */
+  compra_id: number | null;
 }
 
 export interface ResumenFinancieroConFuente {
@@ -131,6 +135,34 @@ export interface EstadoDePresupuesto {
   umbral_alerta: number;
   porcentaje_usado: number;
   estado: EstadoPresupuesto;
+}
+
+export type TipoMetodoPago = "EFECTIVO" | "DEBITO" | "CREDITO" | "SINPE_MOVIL";
+
+export interface MetodoPago {
+  id: number;
+  usuario_id: number;
+  alias: string;
+  tipo: TipoMetodoPago;
+  moneda: string;
+  /** Solo DEBITO/CREDITO llevan esto -ver el modelo del backend. */
+  ultimos_cuatro: string | null;
+  entidad: string | null;
+  dia_corte: number | null;
+  activo: boolean;
+}
+
+/**
+ * Un paso de la trazabilidad de una compra, tal como vive en Mongo: de qué
+ * correo nació, cómo se emparejó el método de pago, qué regla la categorizó.
+ * Es el diferenciador declarado del dominio -ver ADR-002.
+ */
+export interface EventoBitacora {
+  secuencia: number;
+  tipo: string;
+  ocurrido_en: string;
+  actor: { tipo: string; usuario_id: number | null; nombre: string | null };
+  datos: Record<string, unknown>;
 }
 
 export interface ErrorDeApi {
