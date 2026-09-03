@@ -41,6 +41,7 @@ def _configuracion(
         google_client_id="",
         google_client_secret="",
         google_redirect_uri="",
+        google_login_redirect_uri="",
         clave_cifrado_tokens="clave-no-usada-en-estas-pruebas",
         origenes_permitidos=[],
         bccr_correo=correo,

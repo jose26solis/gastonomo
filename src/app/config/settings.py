@@ -50,6 +50,14 @@ class Configuracion:
     google_client_secret: str
     google_redirect_uri: str
 
+    # Mismo cliente de Google, mismo Client ID/Secret -pero "iniciar sesión
+    # con Google" pide un alcance mucho más chico (openid email profile, no
+    # gmail.readonly) y el titular vuelve a una página distinta del
+    # frontend, así que necesita su propio redirect_uri registrado aparte en
+    # Google Cloud (Data Access → agregar otra "Authorized redirect URI" al
+    # mismo cliente, no un cliente nuevo).
+    google_login_redirect_uri: str
+
     # Clave simetrica con la que se cifran los tokens antes de guardarlos.
     clave_cifrado_tokens: str
 
@@ -102,6 +110,10 @@ def obtener_configuracion() -> Configuracion:
         google_redirect_uri=os.getenv(
             "GASTONOMO_GOOGLE_REDIRECT_URI",
             "http://localhost:5173/vincular/gmail/callback",
+        ),
+        google_login_redirect_uri=os.getenv(
+            "GASTONOMO_GOOGLE_LOGIN_REDIRECT_URI",
+            "http://localhost:5173/iniciar-sesion/google/callback",
         ),
         clave_cifrado_tokens=_obtener_clave_cifrado_tokens(),
         origenes_permitidos=_obtener_origenes_permitidos(),

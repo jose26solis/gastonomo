@@ -30,9 +30,11 @@ const TITULOS: Record<Pantalla, [string, string]> = {
 export function AppShell({
   usuario,
   onCerrarSesion,
+  onActualizarUsuario,
 }: {
   usuario: Usuario;
   onCerrarSesion: () => void;
+  onActualizarUsuario: (usuario: Usuario) => void;
 }) {
   const [pantalla, setPantalla] = useState<Pantalla>("resumen");
   const usuarioId = usuario.id;
@@ -84,7 +86,9 @@ export function AppShell({
           )}
           {pantalla === "conectar" && <ConectarCorreo usuarioId={usuarioId} />}
           {pantalla === "bancos" && <Bancos />}
-          {pantalla === "ajustes" && <Ajustes />}
+          {pantalla === "ajustes" && (
+            <Ajustes usuario={usuario} onActualizarUsuario={onActualizarUsuario} />
+          )}
         </div>
       </div>
     </div>

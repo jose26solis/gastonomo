@@ -22,6 +22,7 @@ def _configuracion() -> Configuracion:
         google_client_id="client-de-prueba",
         google_client_secret="secreto-de-prueba",
         google_redirect_uri="http://localhost/api/cuentas-correo/gmail/callback",
+        google_login_redirect_uri="http://localhost/api/auth/google/callback",
         clave_cifrado_tokens="clave-no-usada-en-estas-pruebas",
         origenes_permitidos=[],
         bccr_correo="",

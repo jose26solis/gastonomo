@@ -142,6 +142,14 @@ export interface Usuario {
   nombre_completo: string;
   correo: string;
   moneda_preferida: string;
+  /** Si tiene contraseña propia -false en una cuenta que solo entró por Google. */
+  tiene_contrasena: boolean;
+  /** Si "Iniciar sesión con Google" está activo para esta cuenta. */
+  google_vinculado: boolean;
+}
+
+export interface UrlDeAutorizacion {
+  url_autorizacion: string;
 }
 
 export interface Sesion {

@@ -20,6 +20,7 @@ import type {
   Sesion,
   ResumenFinancieroConFuente,
   TipoDeCambio,
+  UrlDeAutorizacion,
   Usuario,
 } from "./types";
 
@@ -119,6 +120,51 @@ export const api = {
   /** Confirma que un token guardado sigue vigente y trae al titular dueño. */
   yo(): Promise<Usuario> {
     return peticion("/api/auth/yo");
+  },
+
+  /** Pide la URL de Google para "Iniciar sesión con Google" -público, nadie está identificado todavía. */
+  iniciarLoginGoogle(): Promise<UrlDeAutorizacion> {
+    return peticion("/api/auth/google/iniciar");
+  },
+
+  /** Completa el login: crea la cuenta si es la primera vez, o entra a la que ya existía. */
+  completarLoginGoogle(codigo: string, estado: string): Promise<Sesion> {
+    return peticion("/api/auth/google/callback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codigo, estado }),
+    });
+  },
+
+  /** Pide la URL para vincular Google a la cuenta ya logueada -por eso sí necesita sesión. */
+  iniciarVinculacionGoogle(): Promise<UrlDeAutorizacion> {
+    return peticion("/api/auth/google/vincular/iniciar");
+  },
+
+  /** Completa la vinculación. Público a propósito: el `usuario_id` viaja cifrado dentro
+   * de `estado`, no en un encabezado -es la misma cuenta que abrió `iniciarVinculacionGoogle`. */
+  completarVinculacionGoogle(codigo: string, estado: string): Promise<Usuario> {
+    return peticion("/api/auth/google/vincular/callback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codigo, estado }),
+    });
+  },
+
+  desvincularGoogle(): Promise<Usuario> {
+    return peticion("/api/auth/google/vincular", { method: "DELETE" });
+  },
+
+  /** `contrasenaActual` es null para ponerle una primera contraseña a una cuenta de solo Google. */
+  cambiarContrasena(contrasenaActual: string | null, contrasenaNueva: string): Promise<Usuario> {
+    return peticion("/api/auth/contrasena", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contrasena_actual: contrasenaActual,
+        contrasena_nueva: contrasenaNueva,
+      }),
+    });
   },
 
   // ---- Cuentas de correo ----

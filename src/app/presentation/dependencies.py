@@ -19,6 +19,7 @@ from app.business.services.correo.gmail import GmailProveedor
 from app.business.services.correo.outlook import OutlookProveedor
 from app.business.services.correo.proveedor import ProveedorDeCorreo
 from app.business.services.cuenta_correo_service import CuentaCorreoService
+from app.business.services.identidad_google import IdentidadGoogleProveedor
 from app.business.services.presupuesto_service import PresupuestoService
 from app.business.services.tipo_cambio_service import TipoCambioService
 from app.config.cliente_http import obtener_cliente_http
@@ -130,9 +131,20 @@ def obtener_servicio_de_tipo_cambio(cliente: ClienteHttpDependencia) -> TipoCamb
 ServicioDeTipoCambio = Annotated[TipoCambioService, Depends(obtener_servicio_de_tipo_cambio)]
 
 
-def obtener_servicio_de_auth(sesion: SesionDependencia) -> AuthService:
-    """Arma el servicio de autenticación sobre la sesion actual."""
-    return AuthService(UsuarioRepository(sesion))
+def obtener_servicio_de_auth(
+    sesion: SesionDependencia, cliente: ClienteHttpDependencia
+) -> AuthService:
+    """Arma el servicio de autenticación sobre la sesion actual.
+
+    El proveedor de Google queda en `None` -y "Iniciar sesión con Google"
+    da un error claro en vez de arrancar mal- si no hay credenciales de
+    Google configuradas; mismo criterio que Outlook/Gmail para leer correo.
+    """
+    configuracion = obtener_configuracion()
+    google = (
+        IdentidadGoogleProveedor(cliente, configuracion) if configuracion.google_client_id else None
+    )
+    return AuthService(UsuarioRepository(sesion), google)
 
 
 ServicioDeAuth = Annotated[AuthService, Depends(obtener_servicio_de_auth)]

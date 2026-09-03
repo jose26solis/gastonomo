@@ -347,6 +347,12 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `POST` | `/api/auth/registro` | Crea la cuenta y devuelve una sesión ya iniciada (token + usuario) |
 | `POST` | `/api/auth/iniciar-sesion` | Verifica correo y contraseña, devuelve una sesión nueva |
 | `GET` | `/api/auth/yo` | Confirma un token guardado y trae los datos del titular dueño |
+| `POST` | `/api/auth/contrasena` | Cambia la contraseña, o le pone una por primera vez a una cuenta de solo Google |
+| `GET` | `/api/auth/google/iniciar` | URL de Google para "Iniciar sesión con Google" (público) |
+| `POST` | `/api/auth/google/callback` | Completa el login con Google -crea la cuenta si es la primera vez |
+| `GET` | `/api/auth/google/vincular/iniciar` | URL de Google para vincular login con Google a la cuenta ya logueada |
+| `POST` | `/api/auth/google/vincular/callback` | Completa la vinculación (público: el titular viaja cifrado en `estado`) |
+| `DELETE` | `/api/auth/google/vincular` | Desvincula Google -rechaza si es el único método de acceso |
 | `POST` | `/api/categorias` | Crea una categoría aplicando las reglas del dominio |
 | `GET` | `/api/categorias?usuario_id=1` | Lista las categorías activas de un usuario |
 | `GET` | `/api/cuentas-correo/outlook/iniciar?usuario_id=1` | Da la URL para vincular un buzón de Outlook |
@@ -472,6 +478,29 @@ datos de otro id da `403`, no los datos de otro id. Las contraseñas se guardan 
 > de este mismo repositorio en desarrollo, por ejemplo- esa contraseña se puso a mano una sola vez
 > con `hashear_contrasena("demo1234")`; no hay una migración de datos que la reponga sola.
 
+### Iniciar sesión con Google
+
+El botón "Continuar con Google" de la pantalla de login crea la cuenta si es la primera vez, o
+entra a la que ya existía -el mismo botón para las dos cosas, la decisión la toma el backend según
+si ya conoce el `google_id` (el identificador estable de esa cuenta de Google) que Google le
+confirma. Reusa el cliente OAuth2 que ya existe para vincular Gmail (mismo `Client ID`/`Secret` en
+Google Cloud), pero con un alcance mucho más chico -`openid email profile`, nunca
+`gmail.readonly`- y su propio `redirect_uri` registrado aparte
+(`GASTONOMO_GOOGLE_LOGIN_REDIRECT_URI`, ver
+[Registrar las apps](#registrar-las-apps-una-sola-vez-por-integrante) más abajo).
+
+Una cuenta que entra solo por Google no tiene contraseña
+(`Usuario.contrasena_hash` queda en `NULL`) hasta que le pongan una desde **Ajustes → Mi cuenta**.
+Ahí mismo se vincula o desvincula Google a una cuenta que ya tenía contraseña -desvincularlo se
+rechaza si es el único método de acceso que le queda al titular, para no dejar una cuenta sin
+ninguna forma de entrar.
+
+**Por qué un correo que coincide no vincula solo:** si ya existe una cuenta local con ese mismo
+correo pero sin Google vinculado todavía, iniciar sesión con Google *no* entra ahí -nadie confirmó
+que quien tiene esa cuenta de Google ahora mismo sea la misma persona dueña de esa contraseña. El
+mensaje que se muestra pide iniciar sesión con la contraseña y vincular Google desde Ajustes, un
+paso explícito y ya autenticado.
+
 ---
 
 ## Vinculación de correo (Outlook y Gmail)
@@ -518,7 +547,12 @@ que el backend lo descifra sin tener que recordar nada entre la ida y la vuelta.
    `email`) — sin este paso Google rechaza el consentimiento aunque el código pida los scopes
    correctos; a diferencia de Azure, acá hay que declararlos en la consola, no solo en el código.
 4. *Credentials* → *Create credentials* → *OAuth client ID* → tipo *Web application*.
-5. Redirect URI: `http://localhost:5173/vincular/gmail/callback`.
+5. **Dos** Redirect URI en ese mismo cliente -no dos clientes distintos:
+   - `http://localhost:5173/vincular/gmail/callback` (vincular un buzón para leerlo)
+   - `http://localhost:5173/iniciar-sesion/google/callback` ("Iniciar sesión con Google")
+
+   Comparten Client ID y Secret; lo que cambia es el alcance que cada uno pide (`gmail.readonly`
+   contra apenas `openid email profile`) y a qué pantalla del frontend vuelve el titular.
 
 ### Configurar el backend
 
@@ -540,8 +574,9 @@ una clave temporal, pero avisa por warning y los tokens no sobreviven un reinici
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Los valores por defecto de `microsoft_redirect_uri`, `google_redirect_uri` y CORS ya apuntan al
-frontend en `http://localhost:5173`; solo hay que tocarlos si se corre en otro puerto o dominio.
+Los valores por defecto de `microsoft_redirect_uri`, `google_redirect_uri`,
+`google_login_redirect_uri` y CORS ya apuntan al frontend en `http://localhost:5173`; solo hay que
+tocarlos si se corre en otro puerto o dominio.
 
 ### Correr el frontend
 
@@ -738,9 +773,12 @@ Pendiente:
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -la caché resuelve la lentitud, no la falta de esa tubería
 - [x] Registro e inicio de sesión reales -ver [Registro y varios usuarios](#registro-y-varios-usuarios) más abajo
+- [x] Iniciar sesión con Google, y cambiar/poner contraseña ya logueado -ver
+      [Registro y varios usuarios](#registro-y-varios-usuarios)
 - [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
-- [ ] Recuperar u olvidar la contraseña, y un endpoint para cambiarla ya logueado
-- [ ] Pruebas automatizadas de frontend (el backend tiene 205 pruebas; el frontend, ninguna todavía)
+- [ ] Recuperar una contraseña olvidada -hoy hace falta estar logueado para cambiarla; si no hay
+      ninguna sesión con ese correo, no hay forma de recuperar el acceso
+- [ ] Pruebas automatizadas de frontend (el backend tiene 225 pruebas; el frontend, ninguna todavía)
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta

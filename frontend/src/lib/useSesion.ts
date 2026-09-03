@@ -53,6 +53,20 @@ export function useSesion() {
     guardarSesion(await api.iniciarSesion(correo, contrasena));
   }
 
+  /** Llamado desde la página de retorno de Google (`CallbackGoogle.tsx`) tras completar el login. */
+  async function iniciarSesionConGoogle(codigo: string, estado: string) {
+    guardarSesion(await api.completarLoginGoogle(codigo, estado));
+  }
+
+  /**
+   * Refleja en la sesión un cambio de perfil que no vino con un token nuevo
+   * -vincular o desvincular Google, cambiar la contraseña. El token sigue
+   * siendo el mismo; lo único que cambió es qué dice `usuario`.
+   */
+  function actualizarUsuario(actualizado: Usuario) {
+    setUsuario(actualizado);
+  }
+
   /**
    * No hay nada que avisarle al servidor: el token no vive en ninguna tabla
    * (ver `auth_service.py`), así que "cerrar sesión" es, del todo, olvidarlo acá.
@@ -63,5 +77,13 @@ export function useSesion() {
     setUsuario(null);
   }
 
-  return { usuario, cargando, registrar, iniciarSesion, cerrarSesion };
+  return {
+    usuario,
+    cargando,
+    registrar,
+    iniciarSesion,
+    iniciarSesionConGoogle,
+    actualizarUsuario,
+    cerrarSesion,
+  };
 }

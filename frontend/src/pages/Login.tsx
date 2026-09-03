@@ -1,5 +1,7 @@
+import { GoogleLogo } from "@phosphor-icons/react";
 import { useState } from "react";
-import { ErrorDeApiError } from "../api";
+import { api, ErrorDeApiError } from "../api";
+import { marcarFlujoGoogle } from "../lib/flujoGoogle";
 
 function mensajeDeError(error: unknown): string {
   return error instanceof ErrorDeApiError ? error.message : "Ocurrió un error inesperado.";
@@ -48,6 +50,19 @@ export function Login({
       setError(mensajeDeError(e));
     } finally {
       setEnviando(false);
+    }
+  }
+
+  /** Crea la cuenta si es la primera vez, o entra a la que ya existía -mismo botón
+   * para las dos cosas, la decisión la toma el backend según si ya conoce ese `google_id`. */
+  async function continuarConGoogle() {
+    setError(null);
+    try {
+      const { url_autorizacion } = await api.iniciarLoginGoogle();
+      marcarFlujoGoogle("login");
+      window.location.href = url_autorizacion;
+    } catch (e) {
+      setError(mensajeDeError(e));
     }
   }
 
@@ -124,6 +139,22 @@ export function Login({
                 : "Iniciar sesión"}
           </button>
         </form>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+          <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
+          <span style={{ fontSize: 10.5, color: "var(--color-text-dim)" }}>o</span>
+          <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
+        </div>
+
+        <button
+          type="button"
+          onClick={continuarConGoogle}
+          className="btn"
+          style={{ justifyContent: "center", width: "100%", gap: 8 }}
+        >
+          <GoogleLogo size={15} weight="bold" />
+          Continuar con Google
+        </button>
 
         <button
           type="button"

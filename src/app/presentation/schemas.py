@@ -48,8 +48,43 @@ class IniciarSesionRequest(BaseModel):
     contrasena: str = Field(min_length=1, max_length=72)
 
 
+class UrlDeAutorizacionResponse(BaseModel):
+    """La URL de Google a la que el frontend debe redirigir al titular."""
+
+    url_autorizacion: str
+
+
+class CallbackGoogleRequest(BaseModel):
+    """Cuerpo que manda el frontend tras volver de Google -tanto para iniciar sesión
+    como para vincular Google a una cuenta ya logueada. `codigo` y `estado` son
+    justamente el `code` y el `state` que Google agregó a la URL de retorno."""
+
+    codigo: str = Field(min_length=1)
+    estado: str = Field(min_length=1)
+
+
+class CambiarContrasenaRequest(BaseModel):
+    """Cuerpo de POST /api/auth/contrasena.
+
+    `contrasena_actual` es opcional en la forma del dato -una cuenta que
+    llegó solo por Google todavía no tiene ninguna que confirmar- pero
+    `AuthService.cambiar_contrasena` sí la exige si el titular ya tenía una.
+    """
+
+    contrasena_actual: str | None = Field(default=None, max_length=72)
+    contrasena_nueva: str = Field(min_length=1, max_length=72)
+
+
 class UsuarioResponse(BaseModel):
-    """El titular autenticado, sin su hash de contraseña."""
+    """El titular autenticado, sin su hash de contraseña.
+
+    `tiene_contrasena` y `google_vinculado` no son columnas de `Usuario`, son
+    derivadas (`contrasena_hash`/`google_id` no nulos) -por eso este modelo
+    no sale de un `model_validate(usuario)` directo, sino de un pequeño
+    constructor en el router (`_respuesta_de_usuario`). Ajustes los usa para
+    saber si mostrar "Poné una contraseña" o "Cambiar contraseña", y si
+    "Vincular Google" o "Desvincular Google".
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,6 +92,8 @@ class UsuarioResponse(BaseModel):
     nombre_completo: str
     correo: str
     moneda_preferida: Moneda
+    tiene_contrasena: bool
+    google_vinculado: bool
 
 
 class SesionResponse(BaseModel):

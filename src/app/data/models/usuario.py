@@ -27,7 +27,17 @@ class Usuario(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nombre_completo: Mapped[str] = mapped_column(String(120), nullable=False)
     correo: Mapped[str] = mapped_column(String(180), nullable=False, unique=True, index=True)
-    contrasena_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Nula para una cuenta que solo inicia sesión con Google -no tiene
+    # contraseña propia que hashear. `AuthService.iniciar_sesion` (con
+    # correo y contraseña) rechaza cualquier fila con este campo en None
+    # antes de intentar verificar nada.
+    contrasena_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # El identificador estable de la cuenta de Google ("sub"), si el titular
+    # vinculó "Iniciar sesión con Google". Único: dos titulares nunca pueden
+    # compartir la misma cuenta de Google como método de acceso.
+    google_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True, index=True
+    )
     moneda_preferida: Mapped[Moneda] = mapped_column(
         Enum(Moneda), nullable=False, default=Moneda.CRC
     )

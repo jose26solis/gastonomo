@@ -2,6 +2,7 @@
 
 import json
 import time
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from sqlalchemy.orm import Session
@@ -14,14 +15,30 @@ from app.business.services.auth_service import (
     RegistrarUsuarioComando,
     Sesion,
 )
+from app.business.services.identidad_google import PerfilDeGoogle
 from app.data.models.usuario import Usuario
 from app.data.repositories.usuario_repository import UsuarioRepository
 from app.presentation.routers.cuentas_correo import _decodificar_estado
+from tests.apoyos_google import IdentidadGoogleFalsa
 
 
 @pytest.fixture
 def servicio(sesion: Session) -> AuthService:
     return AuthService(UsuarioRepository(sesion))
+
+
+@pytest.fixture
+def google_falso() -> IdentidadGoogleFalsa:
+    return IdentidadGoogleFalsa()
+
+
+@pytest.fixture
+def servicio_con_google(sesion: Session, google_falso: IdentidadGoogleFalsa) -> AuthService:
+    return AuthService(UsuarioRepository(sesion), google_falso)
+
+
+def _extraer_state(url_autorizacion: str) -> str:
+    return parse_qs(urlparse(url_autorizacion).query)["state"][0]
 
 
 def _registrar(servicio: AuthService, correo: str = "ana@ejemplo.cr") -> Sesion:
@@ -221,3 +238,182 @@ def test_iniciar_sesion_de_un_usuario_desactivado_da_credenciales_invalidas(
         servicio.iniciar_sesion(
             IniciarSesionComando(correo="ana@ejemplo.cr", contrasena="contrasena-segura")
         )
+
+
+# ---- Iniciar sesión con Google ----
+
+
+def test_google_no_configurado_da_datos_invalidos(servicio: AuthService) -> None:
+    """`servicio` (sin doble de Google) es justamente el caso "no configurado"."""
+    with pytest.raises(DatosInvalidos):
+        servicio.url_de_inicio_sesion_google()
+
+
+def test_iniciar_sesion_con_google_crea_la_cuenta_la_primera_vez(
+    servicio_con_google: AuthService,
+) -> None:
+    estado = _extraer_state(servicio_con_google.url_de_inicio_sesion_google())
+
+    sesion = servicio_con_google.iniciar_sesion_con_google("codigo-de-google", estado)
+
+    assert sesion.usuario.correo == "ana@gmail.com"
+    assert sesion.usuario.google_id == "google-1"
+    assert sesion.usuario.contrasena_hash is None, "una cuenta de solo Google no tiene contraseña"
+    assert sesion.token
+
+
+def test_iniciar_sesion_con_google_una_segunda_vez_entra_a_la_misma_cuenta(
+    servicio_con_google: AuthService,
+) -> None:
+    estado_1 = _extraer_state(servicio_con_google.url_de_inicio_sesion_google())
+    primera = servicio_con_google.iniciar_sesion_con_google("codigo-1", estado_1)
+
+    estado_2 = _extraer_state(servicio_con_google.url_de_inicio_sesion_google())
+    segunda = servicio_con_google.iniciar_sesion_con_google("codigo-2", estado_2)
+
+    assert segunda.usuario.id == primera.usuario.id
+
+
+def test_iniciar_sesion_con_google_con_correo_no_verificado_se_rechaza(
+    sesion: Session,
+) -> None:
+    perfil = PerfilDeGoogle(
+        id="google-2", correo="ana@gmail.com", correo_verificado=False, nombre="Ana"
+    )
+    servicio = AuthService(UsuarioRepository(sesion), IdentidadGoogleFalsa(perfil))
+    estado = _extraer_state(servicio.url_de_inicio_sesion_google())
+
+    with pytest.raises(DatosInvalidos):
+        servicio.iniciar_sesion_con_google("codigo", estado)
+
+
+def test_iniciar_sesion_con_google_no_linkea_solo_por_coincidir_el_correo(
+    sesion: Session,
+) -> None:
+    """Ya existe una cuenta local con ese correo, pero sin vincular Google: no se
+    inicia sesión en ella con solo tener el mismo correo en la cuenta de Google -eso
+    sería dejar entrar a quien sea que controle esa cuenta de Google a una cuenta
+    que otra persona ya protegió con una contraseña.
+    """
+    servicio = AuthService(UsuarioRepository(sesion))
+    _registrar(servicio, correo="ana@gmail.com")
+
+    perfil = PerfilDeGoogle(
+        id="google-3", correo="ana@gmail.com", correo_verificado=True, nombre="Ana"
+    )
+    servicio_google = AuthService(UsuarioRepository(sesion), IdentidadGoogleFalsa(perfil))
+    estado = _extraer_state(servicio_google.url_de_inicio_sesion_google())
+
+    with pytest.raises(ReglaDeNegocioViolada, match="Ya existe una cuenta"):
+        servicio_google.iniciar_sesion_con_google("codigo", estado)
+
+
+def test_iniciar_sesion_con_google_con_un_state_de_otro_proposito_se_rechaza(
+    servicio_con_google: AuthService,
+) -> None:
+    """Fija la protección contra confusión de tokens para este par de propósitos
+    también -mismo motivo que ya se probó para sesión/vinculación de correo.
+    """
+    estado_de_vinculacion = cifrar(json.dumps({"proposito": "vincular-google", "usuario_id": 1}))
+
+    with pytest.raises(DatosInvalidos):
+        servicio_con_google.iniciar_sesion_con_google("codigo", estado_de_vinculacion)
+
+
+# ---- Vincular / desvincular Google a una cuenta ya logueada ----
+
+
+def test_vincular_google_agrega_el_metodo_de_acceso(
+    servicio_con_google: AuthService,
+) -> None:
+    resultado = _registrar(servicio_con_google)
+    assert resultado.usuario.google_id is None
+
+    estado = _extraer_state(servicio_con_google.url_de_vinculacion_google(resultado.usuario.id))
+    actualizado = servicio_con_google.vincular_google("codigo", estado)
+
+    assert actualizado.google_id == "google-1"
+    assert actualizado.contrasena_hash is not None, "vincular Google no borra la contraseña"
+
+
+def test_vincular_una_cuenta_de_google_ya_vinculada_a_otro_titular_se_rechaza(
+    sesion: Session, google_falso: IdentidadGoogleFalsa
+) -> None:
+    servicio = AuthService(UsuarioRepository(sesion), google_falso)
+    dueno_original = _registrar(servicio, correo="dueno@ejemplo.cr").usuario
+    estado_1 = _extraer_state(servicio.url_de_vinculacion_google(dueno_original.id))
+    servicio.vincular_google("codigo-1", estado_1)
+
+    otro_titular = _registrar(servicio, correo="otro@ejemplo.cr").usuario
+    estado_2 = _extraer_state(servicio.url_de_vinculacion_google(otro_titular.id))
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio.vincular_google("codigo-2", estado_2)
+
+
+def test_desvincular_google_sin_contrasena_se_rechaza(
+    servicio_con_google: AuthService,
+) -> None:
+    """Google es el único método de acceso de esta cuenta -desvincularlo la dejaría sin ninguno."""
+    estado_login = _extraer_state(servicio_con_google.url_de_inicio_sesion_google())
+    usuario = servicio_con_google.iniciar_sesion_con_google("codigo", estado_login).usuario
+    assert usuario.contrasena_hash is None
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio_con_google.desvincular_google(usuario)
+
+
+def test_desvincular_google_con_contrasena_funciona(
+    servicio_con_google: AuthService,
+) -> None:
+    resultado = _registrar(servicio_con_google)
+    estado = _extraer_state(servicio_con_google.url_de_vinculacion_google(resultado.usuario.id))
+    vinculado = servicio_con_google.vincular_google("codigo", estado)
+
+    desvinculado = servicio_con_google.desvincular_google(vinculado)
+
+    assert desvinculado.google_id is None
+
+
+# ---- Cambiar contraseña ----
+
+
+def test_cambiar_contrasena_exige_la_actual_si_ya_tenia_una(servicio: AuthService) -> None:
+    resultado = _registrar(servicio)
+
+    with pytest.raises(CredencialesInvalidas):
+        servicio.cambiar_contrasena(resultado.usuario, "la-que-no-es", "otra-contrasena-nueva")
+
+
+def test_cambiar_contrasena_con_la_actual_correcta_funciona(servicio: AuthService) -> None:
+    resultado = _registrar(servicio)
+
+    servicio.cambiar_contrasena(resultado.usuario, "contrasena-segura", "otra-contrasena-nueva")
+
+    nueva_sesion = servicio.iniciar_sesion(
+        IniciarSesionComando(correo="ana@ejemplo.cr", contrasena="otra-contrasena-nueva")
+    )
+    assert nueva_sesion.usuario.id == resultado.usuario.id
+
+
+def test_ponerle_contrasena_a_una_cuenta_de_solo_google_no_pide_la_actual(
+    servicio_con_google: AuthService,
+) -> None:
+    estado = _extraer_state(servicio_con_google.url_de_inicio_sesion_google())
+    usuario = servicio_con_google.iniciar_sesion_con_google("codigo", estado).usuario
+    assert usuario.contrasena_hash is None
+
+    servicio_con_google.cambiar_contrasena(usuario, None, "una-contrasena-nueva")
+
+    assert usuario.contrasena_hash is not None
+    sesion_por_contrasena = servicio_con_google.iniciar_sesion(
+        IniciarSesionComando(correo="ana@gmail.com", contrasena="una-contrasena-nueva")
+    )
+    assert sesion_por_contrasena.usuario.id == usuario.id
+
+
+def test_cambiar_contrasena_nueva_demasiado_corta_se_rechaza(servicio: AuthService) -> None:
+    resultado = _registrar(servicio)
+
+    with pytest.raises(DatosInvalidos):
+        servicio.cambiar_contrasena(resultado.usuario, "contrasena-segura", "corta")

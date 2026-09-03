@@ -1,5 +1,6 @@
 import { AppShell } from "./components/AppShell";
 import { useSesion } from "./lib/useSesion";
+import { CallbackGoogle } from "./pages/CallbackGoogle";
 import { CallbackVinculacion } from "./pages/CallbackVinculacion";
 import { PoliticaDePrivacidad } from "./pages/legal/PoliticaDePrivacidad";
 import { TerminosDeUso } from "./pages/legal/TerminosDeUso";
@@ -18,13 +19,24 @@ import { Login } from "./pages/Login";
  */
 export function App() {
   const { pathname } = window.location;
-  const { usuario, cargando, registrar, iniciarSesion, cerrarSesion } = useSesion();
+  const {
+    usuario,
+    cargando,
+    registrar,
+    iniciarSesion,
+    iniciarSesionConGoogle,
+    actualizarUsuario,
+    cerrarSesion,
+  } = useSesion();
 
   if (pathname === "/vincular/outlook/callback") {
     return <CallbackVinculacion proveedor="OUTLOOK" />;
   }
   if (pathname === "/vincular/gmail/callback") {
     return <CallbackVinculacion proveedor="GMAIL" />;
+  }
+  if (pathname === "/iniciar-sesion/google/callback") {
+    return <CallbackGoogle onIniciarSesionConGoogle={iniciarSesionConGoogle} />;
   }
   if (pathname === "/privacidad") {
     return <PoliticaDePrivacidad />;
@@ -39,5 +51,7 @@ export function App() {
   if (!usuario) {
     return <Login onRegistrar={registrar} onIniciarSesion={iniciarSesion} />;
   }
-  return <AppShell usuario={usuario} onCerrarSesion={cerrarSesion} />;
+  return (
+    <AppShell usuario={usuario} onCerrarSesion={cerrarSesion} onActualizarUsuario={actualizarUsuario} />
+  );
 }
