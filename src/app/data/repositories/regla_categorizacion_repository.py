@@ -36,11 +36,27 @@ class ReglaCategorizacionRepository(BaseRepository[ReglaCategorizacion]):
             )
         )
 
+    def buscar_por_nombre(self, usuario_id: int, nombre: str) -> ReglaCategorizacion | None:
+        return self.sesion.scalars(
+            select(ReglaCategorizacion).where(
+                ReglaCategorizacion.usuario_id == usuario_id,
+                ReglaCategorizacion.nombre.ilike(nombre),
+            )
+        ).first()
+
     def obtener_de_usuario(self, identificador: int, usuario_id: int) -> ReglaCategorizacion | None:
         return self.sesion.scalars(
             select(ReglaCategorizacion).where(
                 ReglaCategorizacion.id == identificador,
                 ReglaCategorizacion.usuario_id == usuario_id,
+            )
+        ).first()
+
+    def buscar_por_prioridad(self, usuario_id: int, prioridad: int) -> ReglaCategorizacion | None:
+        return self.sesion.scalars(
+            select(ReglaCategorizacion).where(
+                ReglaCategorizacion.usuario_id == usuario_id,
+                ReglaCategorizacion.prioridad == prioridad,
             )
         ).first()
 

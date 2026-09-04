@@ -117,3 +117,112 @@ def test_bitacora_de_una_compra_que_no_existe_da_404(
     )
 
     assert respuesta.status_code == 404
+
+
+def _vincular_y_sincronizar(cliente: TestClient, usuario: Usuario) -> None:
+    estado = _codificar_estado(usuario.id)
+    cliente.get("/api/cuentas-correo/outlook/callback", params={"code": "c", "state": estado})
+    cliente.get("/api/cuentas-correo/resumen-financiero", params={"usuario_id": usuario.id})
+
+
+def test_listar_compras_del_titular(cliente_con_correo_falso: TestClient, usuario: Usuario) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+
+    respuesta = cliente_con_correo_falso.get("/api/compras", params={"usuario_id": usuario.id})
+
+    assert respuesta.status_code == 200
+    compras = respuesta.json()
+    assert len(compras) == 1
+    assert compras[0]["comercio_nombre"] == "WALMART SAN SEBASTIAN"
+    assert compras[0]["total"] == "7870.00"
+    assert compras[0]["requiere_revision"] is True, "sin método de pago ni categoría todavía"
+
+
+def test_listar_compras_filtra_por_requiere_revision(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+
+    todas = cliente_con_correo_falso.get("/api/compras", params={"usuario_id": usuario.id})
+    resueltas = cliente_con_correo_falso.get(
+        "/api/compras", params={"usuario_id": usuario.id, "requiere_revision": False}
+    )
+    pendientes = cliente_con_correo_falso.get(
+        "/api/compras", params={"usuario_id": usuario.id, "requiere_revision": True}
+    )
+
+    assert len(todas.json()) == 1
+    assert len(resueltas.json()) == 0
+    assert len(pendientes.json()) == 1
+
+
+def test_detalle_de_una_compra(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+
+    respuesta = cliente_con_correo_falso.get(
+        f"/api/compras/{compra.id}", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["id"] == compra.id
+    assert cuerpo["metodo_pago_id"] is None
+    assert cuerpo["categoria_id"] is None
+
+
+def test_detalle_de_compra_de_otro_titular_da_404(cliente: TestClient, usuario: Usuario) -> None:
+    respuesta = cliente.get("/api/compras/999999", params={"usuario_id": usuario.id})
+
+    assert respuesta.status_code == 404
+
+
+def test_resolver_revision_asigna_metodo_de_pago(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+    metodo_pago = cliente_con_correo_falso.post(
+        "/api/metodos-pago",
+        json={
+            "usuario_id": usuario.id,
+            "alias": "Amex",
+            "tipo": "CREDITO",
+            "ultimos_cuatro": "4321",
+        },
+    ).json()
+
+    respuesta = cliente_con_correo_falso.post(
+        f"/api/compras/{compra.id}/resolver",
+        params={"usuario_id": usuario.id},
+        json={"metodo_pago_id": metodo_pago["id"]},
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["metodo_pago_id"] == metodo_pago["id"]
+    assert cuerpo["metodo_pago_alias"] == "Amex"
+    assert cuerpo["requiere_revision"] is True, "todavía sin categoría"
+
+
+def test_resolver_revision_sin_campos_da_422(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+
+    respuesta = cliente_con_correo_falso.post(
+        f"/api/compras/{compra.id}/resolver", params={"usuario_id": usuario.id}, json={}
+    )
+
+    assert respuesta.status_code == 422
+
+
+def test_listar_compras_de_otro_titular_se_traduce_a_403(
+    cliente: TestClient, usuario: Usuario
+) -> None:
+    respuesta = cliente.get("/api/compras", params={"usuario_id": usuario.id + 1})
+
+    assert respuesta.status_code == 403

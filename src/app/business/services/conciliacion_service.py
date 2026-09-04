@@ -30,7 +30,12 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.business.errors import ErrorDeProveedorExterno
+from app.business.errors import (
+    DatosInvalidos,
+    ErrorDeProveedorExterno,
+    RecursoNoEncontrado,
+    ReglaDeNegocioViolada,
+)
 from app.business.parsers.comprobante_bac import ComprobanteParseado
 from app.business.services.bitacora_service import Actor, BitacoraComprasService
 from app.business.services.comercio_service import ComercioService
@@ -289,6 +294,111 @@ class ConciliacionService:
                 )
 
         return len(afectadas)
+
+    def resolver_revision(
+        self,
+        usuario_id: int,
+        compra_id: int,
+        metodo_pago_id: int | None,
+        categoria_id: int | None,
+    ) -> Compra:
+        """Corrige a mano el método de pago y/o la categoría de una compra real
+        -pensada para las que quedaron `requiere_revision=True` porque la
+        ingesta no pudo resolver alguno de los dos solo, aunque corre igual
+        sobre cualquier compra si hiciera falta corregir un emparejamiento
+        equivocado.
+
+        Ninguno de los dos campos se inventa el otro: si solo se manda uno,
+        el otro queda tal como estaba. Si la compra ya tenía categoría y se
+        manda una distinta, se corrige el dato pero **no se toca ningún
+        presupuesto** -moverla de un presupuesto a otro exigiría revertir lo
+        que ya se acumuló en el anterior, que es una operación aparte que
+        esto no cubre. Solo se acumula cuando la categoría estaba vacía: ese
+        gasto todavía no había impactado ningún presupuesto.
+        """
+        if metodo_pago_id is None and categoria_id is None:
+            raise DatosInvalidos("Hay que corregir al menos el método de pago o la categoría.")
+
+        compra = self.compras.obtener_de_usuario(compra_id, usuario_id)
+        if compra is None:
+            raise RecursoNoEncontrado(f"La compra {compra_id} no existe en esta cuenta.")
+
+        actor = Actor(tipo="TITULAR", usuario_id=usuario_id)
+        metodo_pago_anterior_id = compra.metodo_pago_id
+
+        if metodo_pago_id is not None:
+            metodo_pago = self.metodos_pago.obtener_de_usuario(metodo_pago_id, usuario_id)
+            if metodo_pago is None:
+                raise RecursoNoEncontrado(
+                    f"El método de pago {metodo_pago_id} no existe en esta cuenta."
+                )
+            if not metodo_pago.activo:
+                raise ReglaDeNegocioViolada("Ese método de pago está desactivado.")
+            compra.metodo_pago_id = metodo_pago.id
+
+        lineas = self.lineas.listar_de_compra(compra.id)
+        linea_principal = lineas[0] if lineas else None
+        categoria_anterior_id = linea_principal.categoria_id if linea_principal else None
+        presupuesto_id = consumido_antes = consumido_despues = None
+
+        if categoria_id is not None:
+            categoria = self.categorias.obtener_de_usuario(categoria_id, usuario_id)
+            if categoria is None:
+                raise RecursoNoEncontrado(f"La categoría {categoria_id} no existe en esta cuenta.")
+            if not categoria.es_hoja:
+                raise ReglaDeNegocioViolada("La categoría tiene que ser una hoja, no un grupo.")
+            if linea_principal is None:
+                raise ReglaDeNegocioViolada("Esta compra no tiene ningún renglón que categorizar.")
+            linea_principal.categoria_id = categoria.id
+            linea_principal.categorizada_automaticamente = False
+
+            if categoria_anterior_id is None:
+                presupuesto = self.presupuestos.buscar(
+                    usuario_id, categoria.id, compra.fecha.year, compra.fecha.month
+                )
+                if presupuesto is not None and presupuesto.moneda == compra.moneda:
+                    presupuesto_id = presupuesto.id
+                    consumido_antes = presupuesto.monto_consumido
+                    presupuesto.monto_consumido = presupuesto.monto_consumido + compra.total
+                    consumido_despues = presupuesto.monto_consumido
+
+        requiere_revision_antes = compra.requiere_revision
+        compra.requiere_revision = compra.metodo_pago_id is None or (
+            linea_principal is None or linea_principal.categoria_id is None
+        )
+
+        self.comprobantes.sesion.commit()
+
+        self.bitacora.registrar_evento(
+            compra_id=compra.id,
+            usuario_id=usuario_id,
+            estado_actual=compra.estado.value,
+            tipo="CORRECCION_MANUAL",
+            datos={
+                "metodo_pago_anterior_id": metodo_pago_anterior_id,
+                "metodo_pago_nuevo_id": compra.metodo_pago_id,
+                "categoria_anterior_id": categoria_anterior_id,
+                "categoria_nueva_id": linea_principal.categoria_id if linea_principal else None,
+                "requiere_revision_antes": requiere_revision_antes,
+                "requiere_revision_despues": compra.requiere_revision,
+            },
+            actor=actor,
+        )
+        if presupuesto_id is not None:
+            self.bitacora.registrar_evento(
+                compra_id=compra.id,
+                usuario_id=usuario_id,
+                estado_actual=compra.estado.value,
+                tipo="IMPACTO_PRESUPUESTO",
+                datos={
+                    "presupuesto_id": presupuesto_id,
+                    "consumido_antes": str(consumido_antes),
+                    "consumido_despues": str(consumido_despues),
+                },
+                actor=actor,
+            )
+
+        return compra
 
     def _categorizar(
         self, usuario_id: int, comercio_normalizado: str

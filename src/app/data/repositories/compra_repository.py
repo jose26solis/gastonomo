@@ -18,9 +18,17 @@ class CompraRepository(BaseRepository[Compra]):
             select(Compra).where(Compra.id == identificador, Compra.usuario_id == usuario_id)
         ).first()
 
-    def listar_de_usuario(self, usuario_id: int) -> list[Compra]:
-        return list(
-            self.sesion.scalars(
-                select(Compra).where(Compra.usuario_id == usuario_id).order_by(Compra.fecha.desc())
-            )
-        )
+    def listar_de_usuario(
+        self, usuario_id: int, requiere_revision: bool | None = None, limite: int = 50
+    ) -> list[Compra]:
+        """Las compras del titular, más recientes primero.
+
+        `requiere_revision` filtra por esa columna cuando no es `None` -es lo
+        que arma la lista de "compras que necesitan revisión" sin traer todo
+        el historial para filtrarlo en Python.
+        """
+        consulta = select(Compra).where(Compra.usuario_id == usuario_id)
+        if requiere_revision is not None:
+            consulta = consulta.where(Compra.requiere_revision.is_(requiere_revision))
+        consulta = consulta.order_by(Compra.fecha.desc(), Compra.id.desc()).limit(limite)
+        return list(self.sesion.scalars(consulta))

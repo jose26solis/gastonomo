@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
+from app.business.errors import DatosInvalidos, RecursoNoEncontrado, ReglaDeNegocioViolada
 from app.business.parsers.comprobante_bac import ComprobanteParseado
 from app.business.services.bitacora_service import BitacoraComprasService
 from app.business.services.categoria_service import CategoriaService, CrearCategoriaComando
@@ -498,3 +499,171 @@ def test_recategorizar_no_toca_una_compra_que_ya_tenia_categoria(
     assert corregidas == 0
     lineas = servicio.lineas.listar_de_compra(resultado.compra_id)
     assert lineas[0].categoria_id == categoria_original.id
+
+
+# ---- resolver_revision: corrección manual de una compra puntual ----
+
+
+def test_resolver_revision_sin_ningun_campo_falla(
+    servicio: ConciliacionService, usuario: Usuario, cuenta_correo: CuentaCorreo, sesion: Session
+) -> None:
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(DatosInvalidos):
+        servicio.resolver_revision(usuario.id, resultado.compra_id, None, None)
+
+
+def test_resolver_revision_de_compra_que_no_existe_falla(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    with pytest.raises(RecursoNoEncontrado):
+        servicio.resolver_revision(usuario.id, 999999, None, 1)
+
+
+def test_resolver_revision_asigna_metodo_de_pago_y_quita_la_marca(
+    servicio: ConciliacionService,
+    metodos_pago: MetodoPagoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Supermercado", color_hex="#22C55E")
+    )
+    comercio = servicio.comercios_servicio.resolver_o_crear("WALMART SAN SEBASTIAN")
+    servicio.comercios_servicio.asignar_categoria(usuario.id, comercio.id, categoria.id)
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+    assert resultado.requiere_revision is True, "sin metodo de pago todavia"
+
+    metodo = metodos_pago.crear(
+        CrearMetodoPagoComando(
+            usuario_id=usuario.id, alias="Amex", tipo=TipoMetodoPago.CREDITO, ultimos_cuatro="4321"
+        )
+    )
+
+    corregida = servicio.resolver_revision(usuario.id, resultado.compra_id, metodo.id, None)
+
+    assert corregida.metodo_pago_id == metodo.id
+    assert corregida.requiere_revision is False
+
+
+def test_resolver_revision_asigna_categoria_y_acumula_presupuesto(
+    servicio: ConciliacionService,
+    metodos_pago: MetodoPagoService,
+    presupuestos: PresupuestoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    metodos_pago.crear(
+        CrearMetodoPagoComando(
+            usuario_id=usuario.id, alias="Amex", tipo=TipoMetodoPago.CREDITO, ultimos_cuatro="4321"
+        )
+    )
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    presupuesto = presupuestos.crear_o_actualizar(
+        usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+    assert resultado.requiere_revision is True, "sin categoria todavia"
+
+    corregida = servicio.resolver_revision(usuario.id, resultado.compra_id, None, categoria.id)
+
+    assert corregida.requiere_revision is False
+    lineas = servicio.lineas.listar_de_compra(corregida.id)
+    assert lineas[0].categoria_id == categoria.id
+    actualizado = presupuestos.presupuestos.obtener_de_usuario(presupuesto.id, usuario.id)
+    assert actualizado.monto_consumido == Decimal("7870.00")
+
+
+def test_resolver_revision_no_toca_presupuesto_si_ya_tenia_categoria(
+    servicio: ConciliacionService,
+    metodos_pago: MetodoPagoService,
+    presupuestos: PresupuestoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    """Corregir una categoría que ya estaba asignada no mueve plata entre presupuestos
+    -ver la nota de `ConciliacionService.resolver_revision`."""
+    categoria_original = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    categoria_nueva = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Otros", color_hex="#6B7280")
+    )
+    presupuesto_original = presupuestos.crear_o_actualizar(
+        usuario.id, categoria_original.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    presupuesto_nuevo = presupuestos.crear_o_actualizar(
+        usuario.id, categoria_nueva.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    comercio = servicio.comercios_servicio.resolver_o_crear("WALMART SAN SEBASTIAN")
+    servicio.comercios_servicio.asignar_categoria(usuario.id, comercio.id, categoria_original.id)
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+    consumido_antes = presupuestos.presupuestos.obtener_de_usuario(
+        presupuesto_original.id, usuario.id
+    ).monto_consumido
+
+    servicio.resolver_revision(usuario.id, resultado.compra_id, None, categoria_nueva.id)
+
+    lineas = servicio.lineas.listar_de_compra(resultado.compra_id)
+    assert lineas[0].categoria_id == categoria_nueva.id
+    original_despues = presupuestos.presupuestos.obtener_de_usuario(
+        presupuesto_original.id, usuario.id
+    )
+    nuevo_despues = presupuestos.presupuestos.obtener_de_usuario(presupuesto_nuevo.id, usuario.id)
+    assert original_despues.monto_consumido == consumido_antes
+    assert nuevo_despues.monto_consumido == Decimal("0")
+
+
+def test_resolver_revision_rechaza_metodo_de_pago_desactivado(
+    servicio: ConciliacionService,
+    metodos_pago: MetodoPagoService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    metodo = metodos_pago.crear(
+        CrearMetodoPagoComando(usuario_id=usuario.id, alias="Amex", tipo=TipoMetodoPago.CREDITO)
+    )
+    metodos_pago.desactivar(usuario.id, metodo.id)
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio.resolver_revision(usuario.id, resultado.compra_id, metodo.id, None)
+
+
+def test_resolver_revision_rechaza_categoria_que_no_es_hoja(
+    servicio: ConciliacionService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    grupo = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    categorias.crear(
+        CrearCategoriaComando(
+            usuario_id=usuario.id,
+            nombre="Supermercado",
+            color_hex="#22C55E",
+            categoria_padre_id=grupo.id,
+        )
+    )
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio.resolver_revision(usuario.id, resultado.compra_id, None, grupo.id)

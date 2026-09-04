@@ -25,6 +25,7 @@ from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.business.services.identidad_google import IdentidadGoogleProveedor
 from app.business.services.metodo_pago_service import MetodoPagoService
 from app.business.services.presupuesto_service import PresupuestoService
+from app.business.services.regla_categorizacion_service import ReglaCategorizacionService
 from app.business.services.tipo_cambio_service import TipoCambioService
 from app.config.cliente_http import obtener_cliente_http
 from app.config.cliente_mongo import obtener_coleccion_bitacora
@@ -137,11 +138,40 @@ ServicioDeMetodosPago = Annotated[MetodoPagoService, Depends(obtener_servicio_de
 
 
 def obtener_servicio_de_compras(sesion: SesionDependencia) -> CompraService:
-    """Arma el servicio de lectura de compras sobre la sesion actual."""
-    return CompraService(CompraRepository(sesion), UsuarioRepository(sesion))
+    """Arma el servicio de lectura de compras sobre la sesion actual.
+
+    Necesita los repositorios de comercio, método de pago, línea y categoría
+    -aparte de `Compra` mismo- porque una fila de la lista o el detalle de
+    una compra resuelve sus nombres (no solo sus ids sueltos): es lo que
+    hace que `Compra` deje de ser visible solo a través de su bitácora.
+    """
+    return CompraService(
+        CompraRepository(sesion),
+        LineaCompraRepository(sesion),
+        ComercioRepository(sesion),
+        MetodoPagoRepository(sesion),
+        CategoriaRepository(sesion),
+        UsuarioRepository(sesion),
+    )
 
 
 ServicioDeCompras = Annotated[CompraService, Depends(obtener_servicio_de_compras)]
+
+
+def obtener_servicio_de_reglas_categorizacion(
+    sesion: SesionDependencia,
+) -> ReglaCategorizacionService:
+    """Arma el servicio de reglas de categorización con sus repositorios sobre la sesion actual."""
+    return ReglaCategorizacionService(
+        ReglaCategorizacionRepository(sesion),
+        CategoriaRepository(sesion),
+        UsuarioRepository(sesion),
+    )
+
+
+ServicioDeReglasCategorizacion = Annotated[
+    ReglaCategorizacionService, Depends(obtener_servicio_de_reglas_categorizacion)
+]
 
 
 def obtener_servicio_de_bitacora() -> BitacoraComprasService:

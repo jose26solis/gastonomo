@@ -10,9 +10,12 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.data.models.enums import (
+    CampoRegla,
+    EstadoCompra,
     EstadoCuentaCorreo,
     EstadoPresupuesto,
     Moneda,
+    OrigenCompra,
     ProveedorCorreo,
     TipoMetodoPago,
 )
@@ -433,6 +436,70 @@ class MetodoPagoResponse(BaseModel):
     entidad: str | None
     dia_corte: int | None
     activo: bool
+
+
+class CrearReglaCategorizacionRequest(BaseModel):
+    """Cuerpo de POST /api/reglas-categorizacion."""
+
+    usuario_id: int = Field(gt=0, le=_ID_MAXIMO)
+    nombre: str = Field(min_length=1, max_length=80, examples=["Supermercados"])
+    patron: str = Field(min_length=1, max_length=200, examples=["WALMART"])
+    categoria_destino_id: int = Field(gt=0, le=_ID_MAXIMO)
+    campo: CampoRegla = CampoRegla.COMERCIO_NORMALIZADO
+    # Sin prioridad, el servicio le asigna la próxima libre -al final de la
+    # lista, para no desplazar sin querer una regla que ya existía.
+    prioridad: int | None = Field(default=None, ge=1)
+
+
+class ReglaCategorizacionResponse(BaseModel):
+    """Una regla de categorización tal como quedó guardada."""
+
+    id: int
+    usuario_id: int
+    nombre: str
+    campo: CampoRegla
+    patron: str
+    categoria_destino_id: int
+    categoria_destino_nombre: str
+    prioridad: int
+    activa: bool
+    veces_aplicada: int
+
+
+class ResolverRevisionCompraRequest(BaseModel):
+    """Cuerpo de POST /api/compras/{id}/resolver.
+
+    Los dos campos son opcionales pero al menos uno tiene que venir -corregir
+    "nada" no es una corrección. Ninguno de los dos se inventa el otro: si
+    solo se manda `categoria_id`, el método de pago queda tal como estaba.
+    """
+
+    metodo_pago_id: int | None = Field(default=None, gt=0, le=_ID_MAXIMO)
+    categoria_id: int | None = Field(default=None, gt=0, le=_ID_MAXIMO)
+
+
+class CompraResponse(BaseModel):
+    """Una compra real, con el nombre de su comercio/método/categoría ya resueltos
+    -para no obligar al frontend a pedirlos aparte por cada fila de una lista."""
+
+    id: int
+    usuario_id: int
+    comercio_id: int
+    comercio_nombre: str
+    metodo_pago_id: int | None
+    metodo_pago_alias: str | None
+    categoria_id: int | None
+    categoria_nombre: str | None
+    fecha: date
+    descripcion: str | None
+    moneda: Moneda
+    total: Decimal
+    total_moneda_base: Decimal
+    tipo_cambio_aplicado: Decimal
+    estado: EstadoCompra
+    origen: OrigenCompra
+    requiere_revision: bool
+    creado_en: datetime
 
 
 class EventoBitacoraResponse(BaseModel):
