@@ -118,16 +118,24 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # Tiene que ser una URL que el navegador de quien use la app pueda
-        # alcanzar de verdad -la IP/dominio real, nunca "backend" (ese
-        # nombre solo existe adentro de esta red de docker compose).
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        # Vacío por defecto a propósito -ver la nota en frontend/Dockerfile:
+        # nginx hace de proxy del backend bajo el mismo origen HTTPS, así que
+        # no hace falta (ni conviene) una URL absoluta a otro origen. Solo
+        # tiene sentido pisarlo si el backend quedara en un dominio aparte.
+        VITE_API_URL: ${VITE_API_URL:-}
     container_name: gastonomo-frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${FRONTEND_HTTP_PORT:-80}:80"
+      - "${FRONTEND_HTTPS_PORT:-443}:443"
+    volumes:
+      # Certificado servido por nginx -autofirmado por defecto (ver
+      # certs/generar.sh), o uno real si lo reemplazás vos. Azure/Google
+      # exigen que el redirect URI empiece con "https", así que el frontend
+      # no puede quedar en HTTP plano si vas a vincular Outlook/Gmail.
+      - ./certs:/etc/nginx/certs:ro
 
 volumes:
   postgres_datos:

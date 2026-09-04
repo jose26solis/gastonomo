@@ -1,0 +1,7 @@
+# Generados por generar.sh -cada máquina/servidor los genera con su propia
+# IP o dominio (ver el SAN del certificado); no tiene sentido versionar uno
+# que solo sirve para el host de quien lo generó, y la clave privada no
+# debería viajar por git aunque sea de un certificado autofirmado.
+*.pem
+*.key
+*.crt

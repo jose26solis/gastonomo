@@ -73,18 +73,29 @@ El dominio completo está diseñado y documentado en la
 
 ## Cómo correr todo con Docker
 
-Necesitás **Docker Desktop** (o Docker Engine + Compose en Linux). Desde la raíz del repositorio:
+Necesitás **Docker Desktop** (o Docker Engine + Compose en Linux) y **OpenSSL** (para el
+certificado -ver abajo; en Linux/Mac ya lo tenés). Desde la raíz del repositorio:
 
 ```bash
+./certs/generar.sh localhost      # o la IP/dominio real, si esto va a un servidor
 docker compose up -d
 ```
 
-Eso levanta los cuatro servicios: PostgreSQL, MongoDB, el backend (FastAPI, imagen armada desde
-[`Dockerfile`](Dockerfile)) y el frontend (build de producción de Vite servido por nginx, imagen
-armada desde [`frontend/Dockerfile`](frontend/Dockerfile)). No hay que configurar nada más para
-probarlo local: las credenciales y puertos traen valores por defecto -para cambiarlos, copiá
-`.env.ejemplo` a `.env` (ver las variables `VITE_API_URL`/`BACKEND_PORT`/`FRONTEND_PORT` ahí, sobre
-todo si esto corre en un servidor real y no en tu máquina).
+El certificado es autofirmado -tu navegador va a avisar "conexión no segura" la primera vez, hay
+que aceptar el riesgo para seguir. Hace falta porque el frontend sirve HTTPS de verdad, no HTTP: es
+un requisito de Azure/Google si vas a vincular Outlook o Gmail (ver la nota completa en
+[`frontend/nginx.conf`](frontend/nginx.conf) y en [`certs/generar.sh`](certs/generar.sh)) -sin
+vinculación de correo real, HTTP también funciona, pero igual hace falta el certificado porque
+nginx no arranca sin uno.
+
+`docker compose up -d` levanta los cuatro servicios: PostgreSQL, MongoDB, el backend (FastAPI,
+imagen armada desde [`Dockerfile`](Dockerfile)) y el frontend (build de producción de Vite servido
+por nginx, imagen armada desde [`frontend/Dockerfile`](frontend/Dockerfile); nginx también hace de
+proxy hacia el backend bajo el mismo origen, para que el navegador no bloquee esas llamadas como
+contenido mixto). No hay que configurar nada más para probarlo local: las credenciales y puertos
+traen valores por defecto -para cambiarlos, copiá `.env.ejemplo` a `.env` (ver `BACKEND_PORT`/
+`FRONTEND_HTTP_PORT`/`FRONTEND_HTTPS_PORT` ahí, sobre todo si esto corre en un servidor real y no
+en tu máquina).
 
 Comprobá que todo quedó arriba:
 
@@ -92,8 +103,9 @@ Comprobá que todo quedó arriba:
 docker compose ps
 ```
 
-Los cuatro contenedores deben decir `Up (healthy)`. La app queda en `http://localhost:5173` (o el
-puerto/IP que hayas configurado); el backend solo, en `http://localhost:8000/docs`.
+Los cuatro contenedores deben decir `Up (healthy)`. La app queda en `https://localhost` (o el
+dominio/IP que hayas usado al generar el certificado); el backend solo, en
+`http://localhost:8000/docs`.
 
 Si solo querés la capa de datos -por ejemplo, para correr el backend y el frontend directo en tu
 máquina en modo desarrollo, con recarga en caliente, en vez de sus imágenes ya compiladas- pedí
@@ -657,6 +669,14 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 Los valores por defecto de `microsoft_redirect_uri`, `google_redirect_uri`,
 `google_login_redirect_uri` y CORS ya apuntan al frontend en `http://localhost:5173`; solo hay que
 tocarlos si se corre en otro puerto o dominio.
+
+> **Corriendo con Docker (ver [Cómo correr todo con Docker](#cómo-correr-todo-con-docker)):** el
+> frontend queda en HTTPS, no en `http://localhost:5173` -Azure y Google exigen que el redirect URI
+> empiece con "https" salvo que sea literalmente `http://localhost`. Registrá ahí los tres
+> `https://<tu-ip-o-dominio>/...` correspondientes (mismas rutas, mismo puerto que uses si no es el
+> 443 por defecto) en vez de los de `localhost:5173` de arriba, y poné esas mismas URLs en
+> `GASTONOMO_MICROSOFT_REDIRECT_URI`/`GASTONOMO_GOOGLE_REDIRECT_URI`/
+> `GASTONOMO_GOOGLE_LOGIN_REDIRECT_URI`/`GASTONOMO_ORIGENES_PERMITIDOS` del `.env`.
 
 ### Correr el frontend
 
