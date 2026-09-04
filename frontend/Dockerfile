@@ -21,5 +21,11 @@ FROM nginx:1.27-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+# 127.0.0.1 explícito, no "localhost": nginx.conf no es byte-idéntico al
+# default.conf de la imagen, así que el entrypoint no le agrega el listen
+# en IPv6 que sí le pondría al de fábrica -"localhost" adentro del
+# contenedor resuelve primero a ::1 y el healthcheck fallaba con
+# "Connection refused" aunque el sitio respondiera bien por IPv4 (que es
+# como llega cualquier tráfico real, LAN o navegador).
 HEALTHCHECK --interval=10s --timeout=5s --retries=10 --start-period=10s \
-    CMD wget -qO- http://localhost/ >/dev/null || exit 1
+    CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
