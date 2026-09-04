@@ -6,6 +6,8 @@ import {
   EnvelopeSimple,
   FileText,
   Gauge,
+  ListChecks,
+  ReceiptX,
   SlidersHorizontal,
   Sparkle,
   SquaresFour,
@@ -20,6 +22,8 @@ export type Pantalla =
   | "bancos"
   | "sinpe"
   | "metodos-pago"
+  | "compras"
+  | "reglas-categorizacion"
   | "ajustes";
 
 const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
@@ -31,6 +35,8 @@ const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
   { id: "bancos", label: "Bancos", icon: Bank },
   { id: "sinpe", label: "SINPE", icon: ArrowsLeftRight },
   { id: "metodos-pago", label: "Métodos de pago", icon: CreditCard },
+  { id: "compras", label: "Compras", icon: ReceiptX },
+  { id: "reglas-categorizacion", label: "Reglas de categorización", icon: ListChecks },
   { id: "ajustes", label: "Ajustes", icon: SlidersHorizontal },
 ];
 

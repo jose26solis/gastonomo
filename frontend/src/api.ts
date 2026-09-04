@@ -8,8 +8,10 @@
 
 import type {
   BancoDetectado,
+  CampoRegla,
   Categoria,
   ComercioClasificado,
+  Compra,
   ComprobanteParseado,
   CuentaCorreo,
   ErrorDeApi,
@@ -20,6 +22,7 @@ import type {
   MetodoPago,
   Presupuesto,
   Proveedor,
+  ReglaCategorizacion,
   Sesion,
   ResumenFinancieroConFuente,
   TipoDeCambio,
@@ -417,6 +420,81 @@ export const api = {
   desactivarMetodoPago(usuarioId: number, metodoPagoId: number): Promise<MetodoPago> {
     return peticion(`/api/metodos-pago/${metodoPagoId}?usuario_id=${usuarioId}`, {
       method: "DELETE",
+    });
+  },
+
+  // ---- Reglas de categorización ----
+
+  /** Sin esto, `ReglaCategorizacion` era un modelo y un motor de evaluación
+   * sin ningún dueño real -ver `regla_categorizacion_service.py`. */
+  crearReglaCategorizacion(datos: {
+    usuarioId: number;
+    nombre: string;
+    patron: string;
+    categoriaDestinoId: number;
+    campo?: CampoRegla;
+    prioridad?: number;
+  }): Promise<ReglaCategorizacion> {
+    return peticion("/api/reglas-categorizacion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario_id: datos.usuarioId,
+        nombre: datos.nombre,
+        patron: datos.patron,
+        categoria_destino_id: datos.categoriaDestinoId,
+        campo: datos.campo ?? "COMERCIO_NORMALIZADO",
+        prioridad: datos.prioridad ?? null,
+      }),
+    });
+  },
+
+  listarReglasCategorizacion(usuarioId: number): Promise<ReglaCategorizacion[]> {
+    return peticion(`/api/reglas-categorizacion?usuario_id=${usuarioId}`);
+  },
+
+  desactivarReglaCategorizacion(usuarioId: number, reglaId: number): Promise<ReglaCategorizacion> {
+    return peticion(`/api/reglas-categorizacion/${reglaId}?usuario_id=${usuarioId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ---- Compras reales ----
+
+  /** Las compras ya conciliadas del titular, más recientes primero.
+   * `requiereRevision: true` trae solo las que quedaron sin método de pago o
+   * sin categoría -la lista que hace visible esa marca, antes invisible. */
+  listarCompras(
+    usuarioId: number,
+    opciones?: { requiereRevision?: boolean; limite?: number },
+  ): Promise<Compra[]> {
+    const parametros = new URLSearchParams({ usuario_id: String(usuarioId) });
+    if (opciones?.requiereRevision !== undefined) {
+      parametros.set("requiere_revision", String(opciones.requiereRevision));
+    }
+    if (opciones?.limite) parametros.set("limite", String(opciones.limite));
+    return peticion(`/api/compras?${parametros.toString()}`);
+  },
+
+  obtenerCompra(usuarioId: number, compraId: number): Promise<Compra> {
+    return peticion(`/api/compras/${compraId}?usuario_id=${usuarioId}`);
+  },
+
+  /** Corrige a mano el método de pago y/o la categoría de una compra -pensada
+   * para resolver una que quedó `requiere_revision`. Al menos uno de los dos
+   * tiene que venir. */
+  resolverRevisionCompra(
+    usuarioId: number,
+    compraId: number,
+    datos: { metodoPagoId?: number; categoriaId?: number },
+  ): Promise<Compra> {
+    return peticion(`/api/compras/${compraId}/resolver?usuario_id=${usuarioId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        metodo_pago_id: datos.metodoPagoId ?? null,
+        categoria_id: datos.categoriaId ?? null,
+      }),
     });
   },
 

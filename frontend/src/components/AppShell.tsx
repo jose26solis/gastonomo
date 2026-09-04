@@ -3,9 +3,11 @@ import type { Usuario } from "../types";
 import { Ajustes } from "../pages/Ajustes";
 import { Bancos } from "../pages/Bancos";
 import { Categorias } from "../pages/Categorias";
+import { Compras } from "../pages/Compras";
 import { ConectarCorreo } from "../pages/ConectarCorreo";
 import { MetodosPago } from "../pages/MetodosPago";
 import { Presupuestos } from "../pages/Presupuestos";
+import { ReglasCategorizacion } from "../pages/ReglasCategorizacion";
 import { Reportes } from "../pages/Reportes";
 import { Resumen } from "../pages/Resumen";
 import { Sinpe } from "../pages/Sinpe";
@@ -21,6 +23,8 @@ const TITULOS: Record<Pantalla, [string, string]> = {
   bancos: ["Fuentes", "Bancos y cuentas"],
   sinpe: ["Fuentes", "Transferencias SINPE"],
   "metodos-pago": ["Fuentes", "Métodos de pago"],
+  compras: ["Conciliación", "Compras"],
+  "reglas-categorizacion": ["Conciliación", "Reglas de categorización"],
   ajustes: ["Cuenta", "Ajustes"],
 };
 
@@ -101,6 +105,10 @@ export function AppShell({
             />
           )}
           {pantalla === "metodos-pago" && <MetodosPago usuarioId={usuarioId} />}
+          {pantalla === "compras" && <Compras usuarioId={usuarioId} />}
+          {pantalla === "reglas-categorizacion" && (
+            <ReglasCategorizacion usuarioId={usuarioId} />
+          )}
           {pantalla === "ajustes" && (
             <Ajustes usuario={usuario} onActualizarUsuario={onActualizarUsuario} />
           )}

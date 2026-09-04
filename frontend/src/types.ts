@@ -152,6 +152,54 @@ export interface MetodoPago {
   activo: boolean;
 }
 
+/** Sobre qué texto se evalúa el patrón de una regla. Solo `COMERCIO_NORMALIZADO`
+ * está soportado hoy -ver la nota en `regla_categorizacion_service.py`. */
+export type CampoRegla = "COMERCIO_NORMALIZADO" | "DESCRIPCION_COMPRA" | "DESCRIPCION_LINEA";
+
+export interface ReglaCategorizacion {
+  id: number;
+  usuario_id: number;
+  nombre: string;
+  campo: CampoRegla;
+  patron: string;
+  categoria_destino_id: number;
+  categoria_destino_nombre: string;
+  prioridad: number;
+  activa: boolean;
+  veces_aplicada: number;
+}
+
+export type EstadoCompra = "BORRADOR" | "REGISTRADA" | "CONCILIADA" | "ANULADA";
+export type OrigenCompra = "INGESTA_CORREO" | "MANUAL" | "IMPORTACION";
+
+/**
+ * Una compra real ya conciliada -el resultado del Proceso 2 del dominio, no
+ * el comprobante crudo. Antes de esto solo se podía ver indirectamente, a
+ * través de `Comprobante` o de los eventos sueltos de la bitácora.
+ */
+export interface Compra {
+  id: number;
+  usuario_id: number;
+  comercio_id: number;
+  comercio_nombre: string;
+  metodo_pago_id: number | null;
+  metodo_pago_alias: string | null;
+  categoria_id: number | null;
+  categoria_nombre: string | null;
+  fecha: string;
+  descripcion: string | null;
+  moneda: string;
+  /** Viajan como string desde Pydantic (Decimal); parsear con Number() para sumar. */
+  total: string;
+  total_moneda_base: string;
+  tipo_cambio_aplicado: string;
+  estado: EstadoCompra;
+  origen: OrigenCompra;
+  /** Quedó sin método de pago o sin categoría al conciliar -ver `Compras.tsx`. */
+  requiere_revision: boolean;
+  creado_en: string;
+}
+
 /**
  * Un paso de la trazabilidad de una compra, tal como vive en Mongo: de qué
  * correo nació, cómo se emparejó el método de pago, qué regla la categorizó.
