@@ -433,7 +433,13 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `POST` | `/api/metodos-pago` | Registra un método de pago (alias, tipo, últimos 4 -solo débito/crédito-, entidad, día de corte -solo crédito-) |
 | `GET` | `/api/metodos-pago?usuario_id=1` | Lista los métodos de pago del titular |
 | `DELETE` | `/api/metodos-pago/{id}?usuario_id=1` | Desactiva un método de pago (no lo borra: una `Compra` ya conciliada sigue apuntándolo) |
+| `GET` | `/api/compras?usuario_id=1` | Lista las compras reales del titular, más recientes primero. Con `&requiere_revision=true` trae solo las que quedaron sin método de pago o sin categoría al conciliar |
+| `GET` | `/api/compras/{id}?usuario_id=1` | Detalle de una compra real, con el nombre de su comercio/método/categoría ya resueltos |
+| `POST` | `/api/compras/{id}/resolver?usuario_id=1` | Corrige a mano el método de pago y/o la categoría de una compra -pensado para resolver una que quedó `requiere_revision` |
 | `GET` | `/api/compras/{id}/bitacora?usuario_id=1` | La trazabilidad completa de una `Compra` real: de qué correo nació, cómo se emparejó el método de pago, qué regla la categorizó, si impactó un presupuesto -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) más abajo |
+| `POST` | `/api/reglas-categorizacion` | Crea una regla de categorización (patrón sobre el nombre del comercio → categoría, con prioridad) |
+| `GET` | `/api/reglas-categorizacion?usuario_id=1` | Lista las reglas de categorización del titular, en orden de prioridad |
+| `DELETE` | `/api/reglas-categorizacion/{id}?usuario_id=1` | Desactiva una regla (conserva `veces_aplicada` como historial) |
 
 `/api/salud` y los tres de `/api/auth` no necesitan sesión. **Todo lo demás sí**: hace falta el
 encabezado `Authorization: Bearer <token>` de una sesión iniciada como el mismo `usuario_id` que se
@@ -455,7 +461,7 @@ ruff check . && ruff format --check .
 ```
 
 Son los mismos comandos que ejecuta la integración continua. Las pruebas corren contra una base
-SQLite **en memoria**, así que no tocan ningún archivo ni necesitan infraestructura. Son 305 en
+SQLite **en memoria**, así que no tocan ningún archivo ni necesitan infraestructura. Son 336 en
 total (`pytest -q` al final del proyecto).
 
 El frontend tiene su propia suite, con Vitest + Testing Library (`cd frontend`):
@@ -468,10 +474,11 @@ npm run test
 npx tsc -b && npm run lint
 ```
 
-39 pruebas: funciones puras de `lib/formato.ts`, `api.ts` con `fetch` mockeado (URL, encabezados,
+50 pruebas: funciones puras de `lib/formato.ts`, `api.ts` con `fetch` mockeado (URL, encabezados,
 traducción de errores), los hooks `useSesion`/`useCuentaActiva`, y componentes de pantalla completos
-(`Bancos.tsx` en sus tres estados, el CRUD de `MetodosPago.tsx`) contra un doble de `api`, sin tocar
-la red. También corre en CI, junto a `pytest`.
+(`Bancos.tsx` en sus tres estados, el CRUD de `MetodosPago.tsx` y `ReglasCategorizacion.tsx`, el
+filtro y la corrección inline de `Compras.tsx`) contra un doble de `api`, sin tocar la red. También
+corre en CI, junto a `pytest`.
 
 ---
 
@@ -484,7 +491,8 @@ Arquitectura en tres capas más configuración. La regla de oro:
 src/app/
 ├── presentation/   → Habla HTTP. Recibe JSON, llama al servicio, devuelve JSON.
 │   ├── routers/        salud.py · categorias.py · cuentas_correo.py · comercios.py ·
-│   │                   presupuestos.py · reportes.py · metodos_pago.py · compras.py
+│   │                   presupuestos.py · reportes.py · metodos_pago.py · compras.py ·
+│   │                   reglas_categorizacion.py
 │   ├── schemas.py      DTOs de entrada y salida
 │   └── dependencies.py arma los servicios con sus repositorios
 │
@@ -492,7 +500,7 @@ src/app/
 │   ├── services/        categoria_service.py · cuenta_correo_service.py ·
 │   │                    comercio_service.py · presupuesto_service.py · resumen_service.py ·
 │   │                    metodo_pago_service.py · conciliacion_service.py · compra_service.py ·
-│   │                    bitacora_service.py (escribe en MongoDB)
+│   │                    regla_categorizacion_service.py · bitacora_service.py (escribe en MongoDB)
 │   │   └── correo/      proveedor.py · outlook.py · gmail.py (hablan con Microsoft/Google)
 │   ├── parsers/          comprobante_bac.py (lee notificaciones de BAC con regex)
 │   ├── seguridad/        cifrado.py (cifra los tokens antes de guardarlos)
@@ -686,6 +694,8 @@ vinculado, estas pantallas quedan disponibles:
 | **Bancos** | Busca "banco" de verdad en los buzones vinculados y agrupa por dominio del remitente; BAC aparece "Conectado" (tiene parser), el resto queda marcado como candidato sin soporte todavía |
 | **SINPE** | Transferencias SINPE recibidas, reales; BAC y Banco Nacional con lector exacto, cualquier otro banco detectado automáticamente con patrones generales y marcado "Sin confirmar". Apagada por default -se prende desde acá o desde Ajustes |
 | **Métodos de pago** | CRUD real de los métodos del titular -sin esto, la conciliación automática no tiene con qué emparejar los últimos 4 dígitos de un comprobante. Cada movimiento del Resumen que concilió una compra real tiene un botón que abre su bitácora completa -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) |
+| **Compras** | Las `Compra` reales, de primera clase -antes solo se veían indirectamente. Filtro "Pendientes de revisión" (default) para las que quedaron sin método de pago o sin categoría, con selectores inline para corregirlas sin salir de la lista |
+| **Reglas de categorización** | CRUD de `ReglaCategorizacion`: patrón sobre el nombre del comercio → categoría, con prioridad. Se evalúan antes que la categoría sugerida del comercio |
 | **Ajustes** *(datos de ejemplo)* | Prototipo de la pantalla, marcado explícitamente como no conectado todavía |
 
 Cada comprobante de BAC se lee y se guarda una sola vez -ver
@@ -868,6 +878,13 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
 - [x] **Pruebas automatizadas de frontend** *(adelantado)* — Vitest + Testing Library, 39 pruebas
       contra `lib/formato.ts`, `api.ts`, los hooks de sesión y dos pantallas completas. Ver
       [Correr las pruebas y el linter](#5-correr-las-pruebas-y-el-linter).
+- [x] **`ReglaCategorizacion` real y `Compra` de primera clase** *(adelantado)* — una auditoría de
+      pantallas encontró que `ReglaCategorizacion` no tenía ningún endpoint que la creara (el motor
+      de categorización siempre caía a la sugerencia del comercio) y que `Compra` -el resultado real
+      de conciliar un comprobante- solo se podía ver indirectamente, sin que `requiere_revision`
+      llegara a ningún lado. Pantallas nuevas **Reglas de categorización** (CRUD) y **Compras**
+      (listado filtrable por "pendientes de revisión", con corrección inline del método de pago y
+      la categoría). 305 → 336 pruebas de backend, 39 → 50 de frontend.
 
 Pendiente:
 
