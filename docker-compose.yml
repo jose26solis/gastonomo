@@ -1,43 +1,23 @@
 # ============================================================================
-#  Gastonomo · Capa de datos
-#
-#  Uso diario -para correr la aplicación real (ver README, "Conectarla a
-#  PostgreSQL"), que crea su propio esquema al arrancar:
+#  Gastonomo
 #
 #      docker compose up -d
 #
-#  Eso levanta PostgreSQL y MongoDB, nada más. Flyway NO corre acá a
-#  propósito: migra sobre la misma base de Postgres que usa la aplicación, y
-#  sus tablas (el modelo original de la propuesta de dominio, del
-#  Laboratorio 2) chocan por nombre con las que crea la aplicación -no son
-#  el mismo esquema. Corrieron ahí una vez y hubo que vaciar el esquema para
-#  que la aplicación pudiera usar esa base; que Flyway se re-disparara solo
-#  en cada `docker compose up -d` fue justamente lo que causó eso.
+#  Levanta todo: PostgreSQL, MongoDB, el backend (FastAPI) y el frontend
+#  (build de Vite servido por nginx). El backend crea su propio esquema al
+#  arrancar (SQLAlchemy, no Flyway -ver README) y siembra las categorías
+#  estándar y un usuario de demostración si la base está vacía.
 #
-#  Para levantar el Laboratorio 2 tal como se entregó -PostgreSQL migrado por
-#  Flyway con las nueve entidades del dominio original, MongoDB con la
-#  colección documental- en un volumen limpio y aparte:
+#  Las migraciones SQL versionadas de la propuesta de dominio original
+#  (db/postgres/migrations/, db/postgres/seeds/, db/mongo/init/) documentan
+#  el modelo de datos -ver docs/modelo-de-datos.md- pero no corren acá: el
+#  esquema real de la aplicación en ejecución es el que gestiona el propio
+#  backend, y ya no conviven las dos cosas en la misma base.
 #
-#      docker compose down -v          (si tenías la app corriendo con Postgres)
-#      docker compose --profile flyway up -d
-#
-#  Qué pasa al ejecutarlo así:
-#    1. Arranca PostgreSQL y espera a que su healthcheck diga que acepta
-#       conexiones (no basta con que el contenedor exista).
-#    2. Flyway aplica V1..V5 en orden y corre el callback de datos de ejemplo.
-#       Termina y se apaga: es una tarea, no un servicio.
-#    3. Arranca MongoDB y, la primera vez, ejecuta los scripts de
-#       db/mongo/init: crean la colección con su validador, sus índices y sus
-#       documentos de ejemplo.
-#
-#  Para volver a cero (borra los datos de los dos volúmenes):
-#
-#      docker compose down -v
-#
-#  Las credenciales tienen valores por defecto para que los comandos de
-#  arriba funcionen sin configurar nada. Para cambiarlas, copiá .env.ejemplo
-#  a .env. Son credenciales de desarrollo local: nunca se usan fuera de esta
-#  máquina.
+#  Las credenciales tienen valores por defecto para que 'docker compose up
+#  -d' funcione sin configurar nada. Para cambiarlas (o para producción),
+#  copiá .env.ejemplo a .env y completá los valores reales -nunca se sube
+#  al repositorio.
 # ============================================================================
 
 name: gastonomo
@@ -62,51 +42,11 @@ services:
     volumes:
       - postgres_datos:/var/lib/postgresql/data
     healthcheck:
-      # Flyway depende de este healthcheck. Sin él intentaría migrar contra una
-      # base que todavía está inicializándose y fallaría de forma intermitente.
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gastonomo} -d ${POSTGRES_DB:-gastonomo}"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 10s
-
-  # --------------------------------------------------------------------------
-  #  Flyway · las migraciones versionadas del Laboratorio 2
-  #
-  #  Detrás del perfil 'flyway' a propósito: NO corre con un 'docker compose
-  #  up -d' normal. Migra el modelo original de la propuesta de dominio sobre
-  #  el mismo Postgres que usa la aplicación en ejecución, y sus tablas
-  #  chocan por nombre con las que esa aplicación crea sola -no son el mismo
-  #  esquema. Para levantarlo hay que pedirlo explícito:
-  #
-  #      docker compose --profile flyway up -d
-  #
-  #  Es una tarea de un solo uso: aplica lo que falte y se apaga con código 0.
-  #  Verla como 'Exited (0)' en docker compose ps es el resultado correcto.
-  #
-  #  Flyway es una herramienta de la JVM y el proyecto es Python; correrla en su
-  #  propio contenedor evita pedirle a nadie que instale Java para migrar la
-  #  base. El esquema queda versionado en SQL plano, que es lo que se entrega.
-  # --------------------------------------------------------------------------
-  flyway:
-    image: flyway/flyway:11
-    container_name: gastonomo-flyway
-    profiles: ["flyway"]
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./db/postgres/migrations:/flyway/sql:ro
-      - ./db/postgres/seeds:/flyway/seeds:ro
-    command: >
-      -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-gastonomo}
-      -user=${POSTGRES_USER:-gastonomo}
-      -password=${POSTGRES_PASSWORD:-gastonomo_local}
-      -locations=filesystem:/flyway/sql,filesystem:/flyway/seeds
-      -connectRetries=15
-      -baselineOnMigrate=false
-      migrate
 
   # --------------------------------------------------------------------------
   #  MongoDB · el subdominio documental
@@ -142,6 +82,52 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  # --------------------------------------------------------------------------
+  #  Backend · FastAPI/uvicorn
+  # --------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gastonomo-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    # .env trae las credenciales de OAuth, la clave de cifrado, etc. -pero
+    # NO la cadena de conexión: esa apunta a los nombres de servicio de esta
+    # misma red (postgres/mongo), no a "localhost" como sí corresponde
+    # cuando el backend corre directo en el host (ver GASTONOMO_URL_BASE_DATOS
+    # en .env.ejemplo). Por eso se pisa acá abajo, después de env_file.
+    env_file:
+      - .env
+    environment:
+      GASTONOMO_URL_BASE_DATOS: postgresql+psycopg://${POSTGRES_USER:-gastonomo}:${POSTGRES_PASSWORD:-gastonomo_local}@postgres:5432/${POSTGRES_DB:-gastonomo}
+      GASTONOMO_MONGO_URL: mongodb://${MONGO_USER:-gastonomo}:${MONGO_PASSWORD:-gastonomo_local}@mongo:27017
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  # --------------------------------------------------------------------------
+  #  Frontend · build de Vite servido por nginx
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Tiene que ser una URL que el navegador de quien use la app pueda
+        # alcanzar de verdad -la IP/dominio real, nunca "backend" (ese
+        # nombre solo existe adentro de esta red de docker compose).
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    container_name: gastonomo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
 
 volumes:
   postgres_datos:

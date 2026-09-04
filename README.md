@@ -37,11 +37,16 @@ El **Laboratorio 2** entrega **la capa de datos completa**, con persistencia pol
 | Esquema PostgreSQL en 3FN con migraciones Flyway `V1`…`V5`, restricciones e índices justificados | [`db/postgres/migrations/`](db/postgres/migrations/) |
 | Subdominio en MongoDB: la colección `bitacora_compras`, con la decisión de incrustar justificada | [`db/mongo/init/`](db/mongo/init/) · [ADR-002](docs/adr/ADR-002-subdominio-documental-en-mongodb.md) |
 | Datos de ejemplo realistas en las dos bases | [`db/postgres/seeds/`](db/postgres/seeds/) · [`db/mongo/init/02_datos_de_ejemplo.js`](db/mongo/init/02_datos_de_ejemplo.js) |
-| Docker Compose que levanta PostgreSQL y MongoDB con un solo comando (`--profile flyway`, ver más abajo) | [`docker-compose.yml`](docker-compose.yml) |
 | Documento técnico del modelo y las decisiones de diseño | [Modelo de datos](docs/modelo-de-datos.md) |
 
 En números: **12 tablas · 17 llaves foráneas · 17 restricciones `UNIQUE` · 42 `CHECK` · 46 índices**
 en PostgreSQL, más **1 colección con validador de esquema y 4 índices** en MongoDB.
+
+Las migraciones son documentación versionada del modelo -no se aplican con el `docker compose up
+-d` de este repositorio, que hoy levanta el esquema real de la aplicación en ejecución (ver
+[Cómo levantar la aplicación](#cómo-correr-la-aplicación)). Para migrarlas de verdad sobre un
+Postgres vacío hace falta correr Flyway aparte, apuntado a `db/postgres/migrations/` y
+`db/postgres/seeds/` -ver [ADR-003](docs/adr/ADR-003-flyway-para-las-migraciones.md).
 
 El **Laboratorio 1**, que sigue en el repositorio, entregó la arquitectura por capas funcionando de
 punta a punta con dos entidades (`Usuario` y `Categoria`) sobre SQLite. La aplicación en ejecución
@@ -66,40 +71,37 @@ El dominio completo está diseñado y documentado en la
 
 ---
 
-## Cómo levantar las bases de datos
+## Cómo correr todo con Docker
 
-Necesitás **Docker Desktop**. Desde la raíz del repositorio:
+Necesitás **Docker Desktop** (o Docker Engine + Compose en Linux). Desde la raíz del repositorio:
 
 ```bash
 docker compose up -d
 ```
 
-Eso levanta PostgreSQL y MongoDB -sin Flyway. No hay que configurar nada más: las credenciales de
-desarrollo vienen como valores por defecto (para cambiarlas, copiá `.env.ejemplo` a `.env`).
-
-> **Por qué Flyway queda afuera de este comando:** migra el modelo original de la propuesta de
-> dominio (`db/postgres/migrations/`) sobre el mismo PostgreSQL que usa la aplicación en ejecución
-> -y sus tablas chocan por nombre con las que la aplicación crea sola (ver
-> [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite)). Para levantar el
-> Laboratorio 2 tal como se entregó, en un volumen limpio y aparte del que usa la aplicación:
->
-> ```bash
-> docker compose down -v            # si tenías Postgres con el esquema de la aplicación
-> docker compose --profile flyway up -d
-> ```
->
-> Eso sí aplica las cinco migraciones con sus datos de ejemplo, y levanta MongoDB con la colección
-> `bitacora_compras` creada, validada, indexada y sembrada.
+Eso levanta los cuatro servicios: PostgreSQL, MongoDB, el backend (FastAPI, imagen armada desde
+[`Dockerfile`](Dockerfile)) y el frontend (build de producción de Vite servido por nginx, imagen
+armada desde [`frontend/Dockerfile`](frontend/Dockerfile)). No hay que configurar nada más para
+probarlo local: las credenciales y puertos traen valores por defecto -para cambiarlos, copiá
+`.env.ejemplo` a `.env` (ver las variables `VITE_API_URL`/`BACKEND_PORT`/`FRONTEND_PORT` ahí, sobre
+todo si esto corre en un servidor real y no en tu máquina).
 
 Comprobá que todo quedó arriba:
 
 ```bash
-docker compose ps -a
+docker compose ps
 ```
 
-`gastonomo-postgres` y `gastonomo-mongo` deben decir `Up (healthy)`. Si además levantaste el
-perfil `flyway`, `gastonomo-flyway` debe decir `Exited (0)`: es una tarea que migra y se apaga, no
-un servicio.
+Los cuatro contenedores deben decir `Up (healthy)`. La app queda en `http://localhost:5173` (o el
+puerto/IP que hayas configurado); el backend solo, en `http://localhost:8000/docs`.
+
+Si solo querés la capa de datos -por ejemplo, para correr el backend y el frontend directo en tu
+máquina en modo desarrollo, con recarga en caliente, en vez de sus imágenes ya compiladas- pedí
+nada más esos dos servicios:
+
+```bash
+docker compose up -d postgres mongo
+```
 
 Mirá los datos de PostgreSQL:
 
@@ -110,28 +112,20 @@ docker compose exec postgres psql -U gastonomo -d gastonomo -c "\dt"
 Y los de MongoDB:
 
 ```bash
-docker compose exec mongo mongosh --quiet -u gastonomo -p gastonomo_local --authenticationDatabase admin gastonomo --eval "db.bitacora_compras.findOne({compra_id: NumberLong(7)})"
+docker compose exec mongo mongosh --quiet -u gastonomo -p gastonomo_local --authenticationDatabase admin gastonomo_app --eval "db.bitacora_compras.find().limit(1)"
 ```
 
-Para borrar todo y empezar de cero:
+Para reconstruir las imágenes después de cambiar código (`docker compose up -d` solo no lo hace si
+la imagen ya existe):
+
+```bash
+docker compose up -d --build
+```
+
+Para borrar todo y empezar de cero (pierde los datos de los volúmenes):
 
 ```bash
 docker compose down -v
-```
-
-### Comprobar que las restricciones hacen su trabajo
-
-Doce intentos de meter datos que el dominio prohíbe. Los doce deben salir como `RECHAZADO OK`:
-
-```bash
-docker compose exec -T postgres psql -U gastonomo -d gastonomo -q < db/pruebas/restricciones_postgres.sql
-```
-
-Seis intentos contra el validador de MongoDB, más las consultas que justifican el diseño de la
-colección:
-
-```bash
-docker compose exec -T mongo mongosh --quiet -u gastonomo -p gastonomo_local --authenticationDatabase admin gastonomo < db/pruebas/validador_mongo.js
 ```
 
 ---
@@ -303,14 +297,10 @@ también en integración continua, que no levanta Docker.
 
 ### Conectarla a PostgreSQL en vez de SQLite
 
-Con `docker compose up -d` corriendo (ver [Cómo levantar las bases de
-datos](#cómo-levantar-las-bases-de-datos)), esta misma aplicación puede usar esa base en lugar del
-archivo local. Es la propia `Base.metadata.create_all()` la que crea las tablas -el esquema que
-migra Flyway (`db/postgres/migrations/`) es el modelo original de la propuesta de dominio, un
-ejercicio aparte del Laboratorio 2 que no comparte base con la app en ejecución. Por eso Flyway no
-corre con el `docker compose up -d` normal (ver el comentario al inicio de `docker-compose.yml`):
-si alguna vez levantaste el perfil `flyway` contra esta misma base, hay que vaciar el esquema
-primero (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`) porque los nombres de tabla chocan.
+Con `docker compose up -d postgres mongo` corriendo (ver [Cómo correr todo con
+Docker](#cómo-correr-todo-con-docker)), esta misma aplicación -corriendo directo en tu máquina, no
+en su imagen- puede usar esa base en lugar del archivo local. Es la propia
+`Base.metadata.create_all()` la que crea las tablas al arrancar.
 
 En el `.env` (copiado de `.env.ejemplo`):
 
@@ -848,8 +838,8 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
       [Caché de comprobantes](#caché-de-comprobantes-y-sincronización-incremental).
 - [x] **La aplicación puede correr sobre PostgreSQL** *(adelantado)* — `GASTONOMO_URL_BASE_DATOS`
       la conecta al Postgres de `docker compose up -d` en vez de SQLite, con su propio esquema
-      (Flyway, el del Laboratorio 2, queda detrás de un perfil aparte a propósito -no compiten por
-      la misma base). Ver [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite).
+      (`Base.metadata.create_all()`, no Flyway). Ver
+      [Conectarla a PostgreSQL](#conectarla-a-postgresql-en-vez-de-sqlite).
 - [x] **Selector de mes en el Resumen** *(adelantado)* — antes solo mostraba el mes más reciente.
 - [x] **Conversión de moneda de referencia** *(adelantado)* — equivalente aproximado en colones de
       un movimiento en dólares, vía el Banco Central. Ver
@@ -885,6 +875,15 @@ contenido exacto de cada uno, así que lo pendiente queda listado sin asignarle 
       llegara a ningún lado. Pantallas nuevas **Reglas de categorización** (CRUD) y **Compras**
       (listado filtrable por "pendientes de revisión", con corrección inline del método de pago y
       la categoría). 305 → 336 pruebas de backend, 39 → 50 de frontend.
+- [x] **Backend y frontend dockerizados** *(adelantado)* — `docker compose up -d` levanta los
+      cuatro servicios de la aplicación en vivo (Postgres, Mongo, backend con
+      [`Dockerfile`](Dockerfile), frontend con [`frontend/Dockerfile`](frontend/Dockerfile) de dos
+      etapas: build de Vite servido por nginx). Antes solo la capa de datos estaba en Docker; el
+      backend y el frontend corrían aparte. De paso, `docker-compose.yml` dejó de convivir con el
+      servicio de Flyway del Laboratorio 2 -las migraciones siguen documentadas en
+      `db/postgres/migrations/` (ver [ADR-003](docs/adr/ADR-003-flyway-para-las-migraciones.md)),
+      pero ya no comparten archivo con la infraestructura de la app en vivo. Ver
+      [Cómo correr todo con Docker](#cómo-correr-todo-con-docker).
 
 Pendiente:
 
