@@ -12,35 +12,49 @@
 # la cadena de confianza del certificado no entra en el chequeo de ellos
 # -solo exigen que el esquema sea "https".
 #
+# Acepta VARIAS identidades a la vez -típicamente hace falta si el servidor
+# se alcanza por más de un nombre/IP (LAN + Tailscale + MagicDNS, por
+# ejemplo): un certificado con una sola identidad en el SAN da error de
+# "nombre no coincide" en cualquiera de las otras, aunque el tráfico llegue
+# igual -es el mismo nginx respondiendo, no importa por dónde entraste.
+#
 # Uso:
 #   ./certs/generar.sh 192.168.100.89
-#   ./certs/generar.sh mi-dominio.com
+#   ./certs/generar.sh 192.168.100.89 100.87.89.117 debian
 #
 # Genera certs/fullchain.pem y certs/privkey.pem -docker-compose.yml ya los
 # monta en el contenedor del frontend. Válido 825 días (el máximo que Apple
 # todavía acepta sin quejarse en Safari/iOS); volvé a correr este script
-# para renovarlo.
+# para renovarlo (agregando o quitando identidades si hiciera falta).
 
 set -euo pipefail
 
-HOST="${1:?Uso: ./certs/generar.sh <ip-o-dominio>}"
+if [ "$#" -lt 1 ]; then
+  echo "Uso: ./certs/generar.sh <ip-o-dominio> [ip-o-dominio-2] ..." >&2
+  exit 1
+fi
+
 DIR="$(dirname "$0")"
 
-# Si HOST es una IP (todo dígitos y puntos), el SAN tiene que declararla
-# como IP:, no como DNS: -los navegadores actuales ignoran el CN y solo
-# miran el Subject Alternative Name, y del tipo que corresponda.
-if [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  SAN="IP:${HOST}"
-else
-  SAN="DNS:${HOST}"
-fi
+# Si una identidad es una IP (todo dígitos y puntos), el SAN tiene que
+# declararla como IP:, no como DNS: -los navegadores actuales ignoran el CN
+# y solo miran el Subject Alternative Name, y del tipo que corresponda.
+SAN=""
+for HOST in "$@"; do
+  if [[ "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    ENTRADA="IP:${HOST}"
+  else
+    ENTRADA="DNS:${HOST}"
+  fi
+  SAN="${SAN:+${SAN},}${ENTRADA}"
+done
 
 openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
   -keyout "${DIR}/privkey.pem" \
   -out "${DIR}/fullchain.pem" \
-  -subj "/CN=${HOST}" \
+  -subj "/CN=${1}" \
   -addext "subjectAltName=${SAN}"
 
-echo "Listo: ${DIR}/fullchain.pem y ${DIR}/privkey.pem para ${HOST}."
+echo "Listo: ${DIR}/fullchain.pem y ${DIR}/privkey.pem para: $*"
 echo "Reconstruí/reiniciá el contenedor del frontend para que los tome:"
 echo "  docker compose up -d --force-recreate frontend"
