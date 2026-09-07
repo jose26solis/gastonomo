@@ -13,7 +13,7 @@ Universidad Nacional · Escuela de Informática y Computación
 |---|---------------------------------------------------------|
 | **Integrantes** | Jose Alexis Solís Carvajal · 1-1623-0238          |
 |  |    Luis Antonio Montes de Oca Ruiz · 1-1800-0270     |
-| **Entrega actual** | Laboratorio 2 — La capa de datos completa: PostgreSQL + MongoDB |
+| **Entrega actual** | Laboratorio 3 — Persistencia con ORM y repositorios |
 
 ---
 
