@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  El backend real corre detrás de un certificado autofirmado (ver
+  certs/generar.sh en la raíz del repo) -Android no confía en él por
+  defecto, igual que un navegador. En vez de desactivar la validación de
+  certificado para el dominio entero (lo que aceptaría cualquier
+  certificado, válido o no), se confía específicamente en ESTE
+  certificado -res/raw/gastonomo_cert.pem, copiado del servidor.
+
+  Si el certificado del servidor se regenera (certs/generar.sh de nuevo,
+  por ejemplo al renovarlo o al agregar una identidad nueva), hay que
+  volver a copiar el .pem acá y reconstruir la app -deja de confiar en el
+  anterior, a propósito.
+-->
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="true">debian</domain>
+        <domain includeSubdomains="true">100.87.89.117</domain>
+        <domain includeSubdomains="true">192.168.100.89</domain>
+        <trust-anchors>
+            <certificates src="@raw/gastonomo_cert" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
