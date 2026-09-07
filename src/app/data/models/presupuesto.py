@@ -1,12 +1,17 @@
 """Entidad Presupuesto: el tope de gasto de una categoría para un mes."""
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, ForeignKey, Numeric, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
 from app.data.models.enums import Moneda
+
+if TYPE_CHECKING:
+    from app.data.models.categoria import Categoria
+    from app.data.models.usuario import Usuario
 
 
 class Presupuesto(Base):
@@ -41,6 +46,11 @@ class Presupuesto(Base):
     monto_limite: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     monto_consumido: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     umbral_alerta: Mapped[int] = mapped_column(nullable=False, default=80)
+
+    # Sin cascade desde Categoria: la duena real es Usuario (cascade en su
+    # propio modelo). Categoria solo se referencia, no lo posee.
+    usuario: Mapped["Usuario"] = relationship(back_populates="presupuestos", lazy="select")
+    categoria: Mapped["Categoria"] = relationship(back_populates="presupuestos", lazy="select")
 
     def __repr__(self) -> str:
         return (

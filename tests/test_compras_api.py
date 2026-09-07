@@ -1,5 +1,7 @@
 """La API de la bitácora de trazabilidad de una compra."""
 
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -7,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.business.services.bitacora_service import Actor, BitacoraComprasService
 from app.data.models.compra import Compra
 from app.data.models.usuario import Usuario
+from app.data.repositories.bitacora_repository import BitacoraRepository
 from app.main import app
 from app.presentation.dependencies import obtener_servicio_de_bitacora
 from app.presentation.routers.cuentas_correo import _codificar_estado
@@ -35,7 +38,7 @@ def test_bitacora_de_una_compra_real(
     cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
 ) -> None:
     coleccion = _ColeccionFalsa()
-    servicio = BitacoraComprasService(coleccion)
+    servicio = BitacoraComprasService(BitacoraRepository(coleccion))
     app.dependency_overrides[obtener_servicio_de_bitacora] = lambda: servicio
     try:
         estado = _codificar_estado(usuario.id)
@@ -226,3 +229,40 @@ def test_listar_compras_de_otro_titular_se_traduce_a_403(
     respuesta = cliente.get("/api/compras", params={"usuario_id": usuario.id + 1})
 
     assert respuesta.status_code == 403
+
+
+def test_gasto_por_categoria_no_queda_enmascarado_por_el_detalle(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    """`/gasto-por-categoria` está declarado antes de `/{compra_id}` en el
+    router -si el orden se invirtiera, FastAPI intentaría convertir
+    "gasto-por-categoria" a `int` para `compra_id` y esto daría 422, no 200."""
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/compras/gasto-por-categoria", params={"usuario_id": usuario.id}
+    )
+
+    assert respuesta.status_code == 200
+    gastos = respuesta.json()
+    assert len(gastos) == 1
+    assert gastos[0]["categoria_id"] is None
+    assert gastos[0]["categoria_nombre"] == "Sin categoría", "sin categoria todavia al conciliar"
+    # No comparo contra el string exacto: la escala del producto es la de
+    # `tipo_cambio_aplicado` (Numeric(14, 6)), no la de `total` -"7870.000000"
+    # es el mismo monto que "7870.00", solo con más ceros de precisión.
+    assert Decimal(gastos[0]["total"]) == Decimal("7870.00")
+
+
+def test_gasto_por_categoria_filtra_por_comercio_sin_resultados(
+    cliente_con_correo_falso: TestClient, usuario: Usuario
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+
+    respuesta = cliente_con_correo_falso.get(
+        "/api/compras/gasto-por-categoria",
+        params={"usuario_id": usuario.id, "comercio_id": 999999},
+    )
+
+    assert respuesta.status_code == 200
+    assert respuesta.json() == []

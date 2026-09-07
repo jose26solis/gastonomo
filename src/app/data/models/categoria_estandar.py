@@ -9,10 +9,15 @@ categoría de esta taxonomía global; cada titular la resuelve contra la suya
 propia mediante `Categoria.categoria_estandar_id`.
 """
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+
+if TYPE_CHECKING:
+    from app.data.models.categoria import Categoria
 
 
 class CategoriaEstandar(Base):
@@ -28,6 +33,13 @@ class CategoriaEstandar(Base):
     descripcion: Mapped[str | None] = mapped_column(String(255), nullable=True)
     color_hex: Mapped[str] = mapped_column(String(7), nullable=False, default="#6B7280")
     orden: Mapped[int] = mapped_column(nullable=False)
+
+    # Sin cascade: es la taxonomia global sembrada una sola vez a nivel de
+    # sistema (ver config/database.py) -borrar una fila de aca no debe
+    # borrar la Categoria propia de ningun titular que haya nacido de ella.
+    categorias: Mapped[list["Categoria"]] = relationship(
+        back_populates="categoria_estandar", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return f"CategoriaEstandar(codigo={self.codigo!r}, nombre={self.nombre!r})"

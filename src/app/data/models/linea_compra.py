@@ -7,11 +7,16 @@ UI (ver el plan de esta ronda).
 """
 
 from decimal import Decimal
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, ForeignKey, Numeric, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+
+if TYPE_CHECKING:
+    from app.data.models.categoria import Categoria
+    from app.data.models.compra import Compra
 
 
 class LineaCompra(Base):
@@ -32,6 +37,14 @@ class LineaCompra(Base):
     subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     categorizada_automaticamente: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
+    )
+
+    # Sin cascade desde aca: la duena de este renglon es Compra (ver su
+    # cascade="all, delete-orphan"), no Categoria -borrar una categoria no
+    # puede borrar el gasto historico, solo dejarlo sin clasificar.
+    compra: Mapped["Compra"] = relationship(back_populates="lineas", lazy="select")
+    categoria: Mapped[Optional["Categoria"]] = relationship(
+        back_populates="lineas_compra", lazy="select"
     )
 
     def __repr__(self) -> str:

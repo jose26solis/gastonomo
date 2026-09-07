@@ -6,21 +6,22 @@ Laboratorio 2 (`TIPOS_DE_EVENTO` de abajo es la misma lista, no una nueva)-
 pero ahora desde la aplicación que corre de verdad, disparada por
 `ConciliacionService` en vez de solo por el seed académico.
 
-Nunca bloquea la conciliación en PostgreSQL: cualquier fallo de conexión o de
-escritura a Mongo se traga y no revienta la transacción de negocio. Es el
-mismo trade-off que documenta ADR-002 -la bitácora **explica** lo que pasó,
-no lo **decide**; ningún saldo ni ningún total del sistema depende de ella.
+El acceso a Mongo en sí -`update_one`, `find_one`, tolerar que la colección
+no esté disponible- vive en `BitacoraRepository` (`data/repositories/`), no
+acá: este servicio solo decide qué evento se registra (valida el tipo, arma
+el documento) y deja que el repositorio decida cómo se guarda. Nunca bloquea
+la conciliación en PostgreSQL: cualquier fallo de conexión o de escritura a
+Mongo se traga en el repositorio y no revienta la transacción de negocio. Es
+el mismo trade-off que documenta ADR-002 -la bitácora **explica** lo que
+pasó, no lo **decide**; ningún saldo ni ningún total del sistema depende de
+ella.
 """
 
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from pymongo.collection import Collection
-from pymongo.errors import PyMongoError
-
-_registro = logging.getLogger(__name__)
+from app.data.repositories.bitacora_repository import BitacoraRepository
 
 # Vocabulario cerrado, idéntico al validador de Mongo. Un tipo que no esté
 # acá nunca debería intentar escribirse -si hiciera falta uno nuevo, primero
@@ -52,15 +53,15 @@ class Actor:
 
 
 class BitacoraComprasService:
-    """Agrega eventos a la bitácora de una compra, tolerando que Mongo no responda.
+    """Decide qué evento se registra en la bitácora de una compra.
 
-    `coleccion` puede ser `None` -por ejemplo si Mongo no está configurado en
-    este ambiente- y el servicio simplemente no escribe nada, en vez de
-    exigir que todo el sistema sepa de Mongo para poder arrancar.
+    Recibe un `BitacoraRepository` -nunca `pymongo` directo- y solo valida el
+    tipo de evento y arma el documento; el repositorio ya tolera que Mongo no
+    esté configurado o no responda, así que este servicio no necesita saberlo.
     """
 
-    def __init__(self, coleccion: Collection | None) -> None:
-        self._coleccion = coleccion
+    def __init__(self, repositorio: BitacoraRepository) -> None:
+        self.bitacora = repositorio
 
     def registrar_evento(
         self,
@@ -71,66 +72,22 @@ class BitacoraComprasService:
         datos: dict[str, Any],
         actor: Actor,
     ) -> None:
-        """Agrega un evento a la bitácora de `compra_id`, creándola si es el primero.
-
-        No propaga ninguna excepción: un Mongo caído o una escritura
-        rechazada quedan solo en el log, nunca revierten lo que ya se
-        confirmó en PostgreSQL.
-        """
-        if self._coleccion is None:
-            return
+        """Agrega un evento a la bitácora de `compra_id`, creándola si es el primero."""
         if tipo not in TIPOS_DE_EVENTO:
             raise ValueError(f"Tipo de evento desconocido: {tipo!r}")
 
         ahora = datetime.now(UTC)
         evento = {
-            "secuencia": self._siguiente_secuencia(compra_id),
+            "secuencia": self.bitacora.contar_eventos(compra_id) + 1,
             "tipo": tipo,
             "ocurrido_en": ahora,
             "actor": {"tipo": actor.tipo, "usuario_id": actor.usuario_id, "nombre": actor.nombre},
             "datos": datos,
         }
-        try:
-            self._coleccion.update_one(
-                {"compra_id": compra_id},
-                {
-                    "$setOnInsert": {
-                        "compra_id": compra_id,
-                        "usuario_id": usuario_id,
-                        "abierta_en": ahora,
-                    },
-                    "$set": {"estado_actual": estado_actual, "actualizada_en": ahora},
-                    "$push": {"eventos": evento},
-                },
-                upsert=True,
-            )
-        except PyMongoError:
-            _registro.warning(
-                "No se pudo escribir el evento %s de la compra %s en la bitácora de Mongo.",
-                tipo,
-                compra_id,
-                exc_info=True,
-            )
+        self.bitacora.agregar_evento(compra_id, usuario_id, estado_actual, ahora, evento)
 
     def bitacora_de(self, compra_id: int) -> list[dict[str, Any]] | None:
         """Los eventos de una compra, en el orden en que ocurrieron. `None` si no hay Mongo
         disponible o la compra todavía no tiene ningún evento."""
-        if self._coleccion is None:
-            return None
-        try:
-            documento = self._coleccion.find_one({"compra_id": compra_id})
-        except PyMongoError:
-            _registro.warning(
-                "No se pudo leer la bitácora de la compra %s.", compra_id, exc_info=True
-            )
-            return None
+        documento = self.bitacora.obtener(compra_id)
         return documento.get("eventos") if documento else None
-
-    def _siguiente_secuencia(self, compra_id: int) -> int:
-        try:
-            documento = self._coleccion.find_one({"compra_id": compra_id}, {"eventos": 1})
-        except PyMongoError:
-            return 1
-        if documento is None:
-            return 1
-        return len(documento.get("eventos", [])) + 1

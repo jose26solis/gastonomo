@@ -502,6 +502,19 @@ class CompraResponse(BaseModel):
     creado_en: datetime
 
 
+class GastoPorCategoriaResponse(BaseModel):
+    """Lo gastado en una categoría, ya sumado en la base y convertido a la moneda base.
+
+    `categoria_id` es `None` en el renglón que agrupa las líneas todavía sin
+    categorizar -no se descarta: es la que hay que ver para saber qué falta
+    clasificar.
+    """
+
+    categoria_id: int | None
+    categoria_nombre: str
+    total: Decimal
+
+
 class EventoBitacoraResponse(BaseModel):
     """Un evento de la trazabilidad de una compra, tal como vive en Mongo.
 

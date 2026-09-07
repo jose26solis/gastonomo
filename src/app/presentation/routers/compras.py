@@ -23,6 +23,7 @@ from app.presentation.dependencies import (
 from app.presentation.schemas import (
     CompraResponse,
     EventoBitacoraResponse,
+    GastoPorCategoriaResponse,
     ResolverRevisionCompraRequest,
 )
 
@@ -69,6 +70,35 @@ def listar(
     return [
         _respuesta(detalle)
         for detalle in servicio.listar_del_titular(usuario_id, requiere_revision, limite)
+    ]
+
+
+@router.get(
+    "/gasto-por-categoria",
+    response_model=list[GastoPorCategoriaResponse],
+    summary="Gasto agregado por categoría, sumado y agrupado en la base de datos",
+)
+def gasto_por_categoria(
+    servicio: ServicioDeCompras,
+    _: VerificarTitular,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+    anio: int | None = Query(default=None, ge=2000, le=2100),
+    mes: int | None = Query(default=None, ge=1, le=12),
+    comercio_id: int | None = Query(default=None, gt=0, le=2_147_483_647),
+) -> list[GastoPorCategoriaResponse]:
+    """Declarado antes de `/{compra_id}` a propósito: FastAPI resuelve las rutas
+    en el orden en que se registran, y como `{compra_id}` es `int`,
+    `gasto-por-categoria` nunca calzaría con él -pero si este endpoint se
+    registrara después, el intento de convertirlo a `int` lo enmascararía
+    con un 422 en vez de responder.
+    """
+    return [
+        GastoPorCategoriaResponse(
+            categoria_id=gasto.categoria_id,
+            categoria_nombre=gasto.categoria_nombre or "Sin categoría",
+            total=gasto.total,
+        )
+        for gasto in servicio.gasto_por_categoria(usuario_id, anio, mes, comercio_id)
     ]
 
 

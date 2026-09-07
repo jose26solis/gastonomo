@@ -1,12 +1,19 @@
 """Entidad Categoria: clasificacion jerarquica del gasto."""
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+from app.data.models.categoria_estandar import CategoriaEstandar
 from app.data.models.usuario import Usuario
+
+if TYPE_CHECKING:
+    from app.data.models.comercio_categoria_sugerida import ComercioCategoriaSugerida
+    from app.data.models.linea_compra import LineaCompra
+    from app.data.models.presupuesto import Presupuesto
+    from app.data.models.regla_categorizacion import ReglaCategorizacion
 
 
 class Categoria(Base):
@@ -42,11 +49,31 @@ class Categoria(Base):
     es_hoja: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    usuario: Mapped[Usuario] = relationship(back_populates="categorias")
+    usuario: Mapped[Usuario] = relationship(back_populates="categorias", lazy="select")
     categoria_padre: Mapped[Optional["Categoria"]] = relationship(
-        back_populates="subcategorias", remote_side=[id]
+        back_populates="subcategorias", remote_side=[id], lazy="select"
     )
-    subcategorias: Mapped[list["Categoria"]] = relationship(back_populates="categoria_padre")
+    subcategorias: Mapped[list["Categoria"]] = relationship(
+        back_populates="categoria_padre", lazy="select"
+    )
+    # Sin cascade en ninguna de las siguientes: la duena real es Usuario (ver
+    # su cascade="all, delete-orphan"), esta es la vista desde Categoria del
+    # mismo vinculo, no una segunda relacion de propiedad.
+    categoria_estandar: Mapped[CategoriaEstandar | None] = relationship(
+        back_populates="categorias", lazy="select"
+    )
+    sugerencias_comercio: Mapped[list["ComercioCategoriaSugerida"]] = relationship(
+        back_populates="categoria", lazy="select"
+    )
+    presupuestos: Mapped[list["Presupuesto"]] = relationship(
+        back_populates="categoria", lazy="select"
+    )
+    reglas_categorizacion: Mapped[list["ReglaCategorizacion"]] = relationship(
+        back_populates="categoria_destino", lazy="select"
+    )
+    lineas_compra: Mapped[list["LineaCompra"]] = relationship(
+        back_populates="categoria", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return f"Categoria(id={self.id!r}, nombre={self.nombre!r}, usuario_id={self.usuario_id!r})"

@@ -6,11 +6,17 @@ primera que coincide, para que el usuario pueda poner excepciones específicas
 antes que las generales.
 """
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
 from app.data.models.enums import CampoRegla
+
+if TYPE_CHECKING:
+    from app.data.models.categoria import Categoria
+    from app.data.models.usuario import Usuario
 
 
 class ReglaCategorizacion(Base):
@@ -37,6 +43,13 @@ class ReglaCategorizacion(Base):
     prioridad: Mapped[int] = mapped_column(nullable=False)
     activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     veces_aplicada: Mapped[int] = mapped_column(nullable=False, default=0)
+
+    # Sin cascade desde Categoria: la duena real es Usuario. Categoria solo
+    # se referencia como destino de la regla, no la posee.
+    usuario: Mapped["Usuario"] = relationship(back_populates="reglas_categorizacion", lazy="select")
+    categoria_destino: Mapped["Categoria"] = relationship(
+        back_populates="reglas_categorizacion", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return f"ReglaCategorizacion(usuario_id={self.usuario_id!r}, nombre={self.nombre!r})"

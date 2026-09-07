@@ -1,6 +1,7 @@
 """Entidad CuentaCorreo: el buzón vinculado del que se leen los comprobantes."""
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -9,6 +10,10 @@ from app.data.models.base import Base
 from app.data.models.enums import EstadoCuentaCorreo, ProveedorCorreo
 from app.data.models.tipos import FechaHoraUTC
 from app.data.models.usuario import Usuario
+
+if TYPE_CHECKING:
+    from app.data.models.comprobante import Comprobante
+    from app.data.models.transferencia_sinpe import TransferenciaSinpe
 
 
 class CuentaCorreo(Base):
@@ -48,7 +53,16 @@ class CuentaCorreo(Base):
         Enum(EstadoCuentaCorreo), nullable=False, default=EstadoCuentaCorreo.ACTIVA
     )
 
-    usuario: Mapped[Usuario] = relationship(back_populates="cuentas_correo")
+    usuario: Mapped[Usuario] = relationship(back_populates="cuentas_correo", lazy="select")
+    # cascade="all, delete-orphan" en las dos: son la cache de lo ya leido de
+    # este buzon en particular (ver sus propios docstrings) -desvincular la
+    # cuenta no deja huerfanos.
+    comprobantes: Mapped[list["Comprobante"]] = relationship(
+        back_populates="cuenta_correo", cascade="all, delete-orphan", lazy="select"
+    )
+    transferencias_sinpe: Mapped[list["TransferenciaSinpe"]] = relationship(
+        back_populates="cuenta_correo", cascade="all, delete-orphan", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return (

@@ -305,7 +305,10 @@ presupuesto- el diferenciador declarado del dominio.
 
 Necesitás **Python 3.12 o superior** (nosotros usamos 3.14). **No hace falta Docker para esta
 parte**: por defecto la aplicación usa SQLite local y crea el archivo sola al arrancar -así arranca
-también en integración continua, que no levanta Docker.
+también el paso de integración continua que la levanta con `uvicorn` y le pega a `/api/salud`. (El
+único paso del CI que sí levanta Docker es el de las pruebas de integración contra Postgres real
+-ver [Correr las pruebas y el linter](#5-correr-las-pruebas-y-el-linter)- y lo hace la propia prueba,
+no este arranque.)
 
 ### Conectarla a PostgreSQL en vez de SQLite
 
@@ -455,16 +458,32 @@ Central — ver [Conversión de moneda](#conversión-de-moneda-banco-central-de-
 ### 5. Correr las pruebas y el linter
 
 ```bash
-pytest -v
+pytest -v -m "not integracion"
 ```
 
 ```bash
 ruff check . && ruff format --check .
 ```
 
-Son los mismos comandos que ejecuta la integración continua. Las pruebas corren contra una base
-SQLite **en memoria**, así que no tocan ningún archivo ni necesitan infraestructura. Son 336 en
-total (`pytest -q` al final del proyecto).
+Son los mismos comandos que ejecuta la integración continua. Estas pruebas corren contra una base
+SQLite **en memoria**, así que no tocan ningún archivo ni necesitan infraestructura. Son 343 en
+total (`pytest -q -m "not integracion"` al final del proyecto).
+
+Aparte, `tests/integracion/` (marcador `integracion`) corre contra un **Postgres real**
+(`postgres:16-alpine`), levantado por la propia prueba con
+[Testcontainers](https://testcontainers.com/) -no hace falta tenerlo corriendo aparte, solo Docker
+disponible:
+
+```bash
+pytest -v --strict-markers -m integracion
+```
+
+6 pruebas que verifican justo lo que SQLite no puede probar igual de bien -y que por eso no viven
+en el resto de la suite: `NUMERIC` exacto en aritmética de SQL, `ON DELETE CASCADE`/`RESTRICT`
+reales (SQLite los ignora sin `PRAGMA foreign_keys=ON`, que esta app nunca enciende), el largo real
+de un `VARCHAR`, y que el `ROLLBACK` deshaga una transacción completa, no solo la sentencia que
+falló. Si no hay Docker corriendo, se saltan solas (`SKIPPED`) en vez de fallar; en el CI sí hay
+Docker, y ahí corren de verdad, en su propio paso separado del resto de la suite.
 
 El frontend tiene su propia suite, con Vitest + Testing Library (`cd frontend`):
 

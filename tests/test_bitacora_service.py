@@ -4,6 +4,7 @@ import pytest
 from pymongo.errors import PyMongoError
 
 from app.business.services.bitacora_service import Actor, BitacoraComprasService
+from app.data.repositories.bitacora_repository import BitacoraRepository
 
 
 class _ColeccionFalsa:
@@ -53,7 +54,7 @@ def coleccion() -> _ColeccionFalsa:
 
 @pytest.fixture
 def servicio(coleccion: _ColeccionFalsa) -> BitacoraComprasService:
-    return BitacoraComprasService(coleccion)
+    return BitacoraComprasService(BitacoraRepository(coleccion))
 
 
 def test_registrar_evento_crea_el_documento_la_primera_vez(
@@ -122,7 +123,7 @@ def test_bitacora_de_una_compra_sin_eventos_da_none(servicio: BitacoraComprasSer
 def test_sin_coleccion_no_escribe_ni_revienta() -> None:
     """Mongo no configurado en este ambiente -el servicio sigue existiendo y
     cualquier llamado es un no-op, no un error."""
-    servicio = BitacoraComprasService(None)
+    servicio = BitacoraComprasService(BitacoraRepository(None))
 
     servicio.registrar_evento(7, 1, "REGISTRADA", "PARSEO_COMPROBANTE", {}, Actor(tipo="SERVICIO"))
 
@@ -130,13 +131,13 @@ def test_sin_coleccion_no_escribe_ni_revienta() -> None:
 
 
 def test_un_mongo_caido_no_revienta_al_registrar() -> None:
-    servicio = BitacoraComprasService(_ColeccionQueFalla())
+    servicio = BitacoraComprasService(BitacoraRepository(_ColeccionQueFalla()))
 
     # No debe lanzar -la bitácora explica, no decide (ver ADR-002).
     servicio.registrar_evento(7, 1, "REGISTRADA", "PARSEO_COMPROBANTE", {}, Actor(tipo="SERVICIO"))
 
 
 def test_un_mongo_caido_no_revienta_al_leer() -> None:
-    servicio = BitacoraComprasService(_ColeccionQueFalla())
+    servicio = BitacoraComprasService(BitacoraRepository(_ColeccionQueFalla()))
 
     assert servicio.bitacora_de(7) is None

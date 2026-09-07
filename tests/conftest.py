@@ -25,6 +25,7 @@ from app.config.database import obtener_sesion
 from app.data.models.base import Base
 from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.bitacora_repository import BitacoraRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
 from app.data.repositories.comercio_repository import ComercioRepository
@@ -68,7 +69,7 @@ def _armar_conciliacion(sesion: Session) -> ConciliacionService:
             CategoriaRepository(sesion),
         ),
         _tipo_de_cambio_de_la_prueba(),
-        BitacoraComprasService(None),
+        BitacoraComprasService(BitacoraRepository(None)),
     )
 
 
@@ -139,7 +140,9 @@ def cliente(sesion: Session, usuario: Usuario) -> Iterator[TestClient]:
     propio doble -ver `tests/test_compras_api.py`.
     """
     app.dependency_overrides[obtener_sesion] = lambda: sesion
-    app.dependency_overrides[obtener_servicio_de_bitacora] = lambda: BitacoraComprasService(None)
+    app.dependency_overrides[obtener_servicio_de_bitacora] = lambda: BitacoraComprasService(
+        BitacoraRepository(None)
+    )
     sesion_de_auth = AuthService(UsuarioRepository(sesion)).iniciar_sesion(
         IniciarSesionComando(correo=usuario.correo, contrasena=CONTRASENA_DE_PRUEBA)
     )

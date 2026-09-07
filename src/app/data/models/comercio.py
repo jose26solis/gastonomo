@@ -1,9 +1,15 @@
 """Entidad Comercio: el establecimiento donde se compró."""
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+
+if TYPE_CHECKING:
+    from app.data.models.comercio_categoria_sugerida import ComercioCategoriaSugerida
+    from app.data.models.compra import Compra
 
 
 class Comercio(Base):
@@ -26,6 +32,14 @@ class Comercio(Base):
     )
     identificacion_tributaria: Mapped[str | None] = mapped_column(String(20), nullable=True)
     provincia: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    # Sin cascade en ninguna: Comercio es catalogo compartido entre
+    # titulares -borrarlo no puede borrar el gasto ni la clasificacion de
+    # nadie. El dueno real de esas filas es Usuario.
+    compras: Mapped[list["Compra"]] = relationship(back_populates="comercio", lazy="select")
+    categorias_sugeridas: Mapped[list["ComercioCategoriaSugerida"]] = relationship(
+        back_populates="comercio", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return f"Comercio(id={self.id!r}, nombre={self.nombre!r})"

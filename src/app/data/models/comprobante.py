@@ -16,11 +16,16 @@ hacerlo.
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+
+if TYPE_CHECKING:
+    from app.data.models.compra import Compra
+    from app.data.models.cuenta_correo import CuentaCorreo
 
 
 class Comprobante(Base):
@@ -90,6 +95,14 @@ class Comprobante(Base):
     # más preciso de lo que es.
     tipo_cambio_venta: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     tipo_cambio_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Sin cascade: la duena de este renglon es CuentaCorreo (ver su cascade),
+    # no Compra -el comprobante es el documento de origen y sigue existiendo
+    # aunque la Compra que concilio se corrija o se anule.
+    cuenta_correo: Mapped["CuentaCorreo"] = relationship(
+        back_populates="comprobantes", lazy="select"
+    )
+    compra: Mapped[Optional["Compra"]] = relationship(back_populates="comprobantes", lazy="select")
 
     def __repr__(self) -> str:
         return (

@@ -8,13 +8,21 @@ después cambie la tasa de cambio corregida. Nace de `ConciliacionService`
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Numeric, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
 from app.data.models.enums import EstadoCompra, Moneda, OrigenCompra
 from app.data.models.tipos import FechaHoraUTC
+
+if TYPE_CHECKING:
+    from app.data.models.comercio import Comercio
+    from app.data.models.comprobante import Comprobante
+    from app.data.models.linea_compra import LineaCompra
+    from app.data.models.metodo_pago import MetodoPago
+    from app.data.models.usuario import Usuario
 
 
 class Compra(Base):
@@ -48,6 +56,24 @@ class Compra(Base):
     creado_en: Mapped[datetime] = mapped_column(
         FechaHoraUTC, nullable=False, default=lambda: datetime.now(UTC)
     )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="compras", lazy="select")
+    # Sin cascade: Comercio es catalogo compartido y MetodoPago es propio del
+    # titular pero no de esta compra -ninguno de los dos "posee" a Compra, es
+    # al reves. El dueno real de esta fila es Usuario.
+    comercio: Mapped["Comercio"] = relationship(back_populates="compras", lazy="select")
+    metodo_pago: Mapped[Optional["MetodoPago"]] = relationship(
+        back_populates="compras", lazy="select"
+    )
+    # cascade="all, delete-orphan": un renglon no existe fuera de su compra
+    # (ver el docstring de LineaCompra), coherente con el
+    # ondelete="CASCADE" que ya tiene esa columna a nivel de base de datos.
+    lineas: Mapped[list["LineaCompra"]] = relationship(
+        back_populates="compra", cascade="all, delete-orphan", lazy="select"
+    )
+    # Sin cascade: el Comprobante es el documento de origen -existe desde
+    # antes de que esta Compra se conciliara- no algo que Compra posea.
+    comprobantes: Mapped[list["Comprobante"]] = relationship(back_populates="compra", lazy="select")
 
     def __repr__(self) -> str:
         return f"Compra(id={self.id!r}, usuario_id={self.usuario_id!r}, total={self.total!r})"

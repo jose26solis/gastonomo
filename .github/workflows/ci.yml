@@ -47,10 +47,21 @@ jobs:                         # Un workflow tiene uno o más "jobs" (trabajos)
           ruff check .
           ruff format --check .
 
-      # Paso 5: correr las pruebas
+      # Paso 5: correr las pruebas sobre SQLite en memoria
       #   Si algo falla, el workflow se marca en ROJO. Si todo pasa, en VERDE.
+      #   Las de integración (marcador "integracion") van aparte en el paso
+      #   siguiente: necesitan Docker, que este paso no levanta.
       - name: Correr las pruebas
-        run: pytest -v
+        run: pytest -v -m "not integracion"
+
+      # Paso 5b: correr las pruebas de integración, contra un Postgres real
+      #   El runner de GitHub Actions ya trae Docker instalado y corriendo,
+      #   así que el contenedor (postgres:16-alpine) lo levanta la propia
+      #   prueba con Testcontainers -no hace falta declarar ningún
+      #   "services:" acá. "--strict-markers" hace que un typo en el nombre
+      #   del marcador falle el paso en vez de simplemente no correr nada.
+      - name: Pruebas de integración (Postgres real)
+        run: pytest -v --strict-markers -m integracion
 
       # Paso 6: verificar que la aplicación de verdad levanta
       #   Los tests usan un cliente en memoria; esto arranca el servidor real

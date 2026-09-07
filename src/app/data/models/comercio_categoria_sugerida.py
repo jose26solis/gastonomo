@@ -1,9 +1,16 @@
 """Entidad ComercioCategoriaSugerida: la categoría que un titular le asignó a un comercio."""
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import ForeignKey, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+
+if TYPE_CHECKING:
+    from app.data.models.categoria import Categoria
+    from app.data.models.comercio import Comercio
+    from app.data.models.usuario import Usuario
 
 
 class ComercioCategoriaSugerida(Base):
@@ -35,6 +42,19 @@ class ComercioCategoriaSugerida(Base):
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuario.id"), nullable=False, index=True)
     comercio_id: Mapped[int] = mapped_column(ForeignKey("comercio.id"), nullable=False, index=True)
     categoria_id: Mapped[int] = mapped_column(ForeignKey("categoria.id"), nullable=False)
+
+    # Sin cascade: la duena real es Usuario (back_populates
+    # "comercio_categorias_sugeridas", cascade="all, delete-orphan"). Comercio
+    # y Categoria solo la referencian, no la poseen.
+    usuario: Mapped["Usuario"] = relationship(
+        back_populates="comercio_categorias_sugeridas", lazy="select"
+    )
+    comercio: Mapped["Comercio"] = relationship(
+        back_populates="categorias_sugeridas", lazy="select"
+    )
+    categoria: Mapped["Categoria"] = relationship(
+        back_populates="sugerencias_comercio", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return (

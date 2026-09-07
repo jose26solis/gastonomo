@@ -6,18 +6,20 @@ los eventos de su bitácora en Mongo -nunca la Compra en sí, ni su
 `requiere_revision`, ni con qué método de pago o categoría quedó. Este
 servicio es lo que la hace un dato de primera clase: listable, filtrable por
 "necesita revisión", y consultable una por una con sus nombres ya resueltos.
+
+`_detallar` lee de las relaciones que `CompraRepository` ya trae cargadas
+(`comercio`, `metodo_pago`, `lineas.categoria`) en vez de resolverlas con un
+`obtener_por_id` propio por cada una: antes eran 1 + 4N consultas para listar
+N compras (una por comercio, una por método de pago, una por sus renglones y
+una por categoría, todas dentro del bucle); con la carga ansiosa del
+repositorio son 2 consultas sin importar cuántas compras traiga la página.
 """
 
 from dataclasses import dataclass
 
 from app.business.errors import RecursoNoEncontrado
 from app.data.models.compra import Compra
-from app.data.repositories.categoria_repository import CategoriaRepository
-from app.data.repositories.comercio_repository import ComercioRepository
-from app.data.repositories.compra_repository import CompraRepository
-from app.data.repositories.linea_compra_repository import LineaCompraRepository
-from app.data.repositories.metodo_pago_repository import MetodoPagoRepository
-from app.data.repositories.usuario_repository import UsuarioRepository
+from app.data.repositories.compra_repository import CompraRepository, GastoPorCategoria
 
 
 @dataclass(frozen=True)
@@ -40,21 +42,8 @@ class CompraDetallada:
 class CompraService:
     """Consultas de compras reales ya conciliadas."""
 
-    def __init__(
-        self,
-        compra_repository: CompraRepository,
-        linea_compra_repository: LineaCompraRepository,
-        comercio_repository: ComercioRepository,
-        metodo_pago_repository: MetodoPagoRepository,
-        categoria_repository: CategoriaRepository,
-        usuario_repository: UsuarioRepository,
-    ) -> None:
+    def __init__(self, compra_repository: CompraRepository) -> None:
         self.compras = compra_repository
-        self.lineas = linea_compra_repository
-        self.comercios = comercio_repository
-        self.metodos_pago = metodo_pago_repository
-        self.categorias = categoria_repository
-        self.usuarios = usuario_repository
 
     def obtener_del_titular(self, usuario_id: int, compra_id: int) -> Compra:
         """La compra, solo si pertenece al titular indicado.
@@ -83,25 +72,31 @@ class CompraService:
     def obtener_detalle_del_titular(self, usuario_id: int, compra_id: int) -> CompraDetallada:
         return self._detallar(self.obtener_del_titular(usuario_id, compra_id))
 
+    def gasto_por_categoria(
+        self,
+        usuario_id: int,
+        anio: int | None = None,
+        mes: int | None = None,
+        comercio_id: int | None = None,
+    ) -> list[GastoPorCategoria]:
+        """Cuánto gastó el titular en cada categoría, con filtros opcionales de
+        período y comercio. Ver `CompraRepository.gasto_por_categoria` -la suma
+        la hace la base de datos, no este servicio."""
+        return self.compras.gasto_por_categoria(usuario_id, anio, mes, comercio_id)
+
     def _detallar(self, compra: Compra) -> CompraDetallada:
-        comercio = self.comercios.obtener_por_id(compra.comercio_id)
-        metodo_pago = (
-            self.metodos_pago.obtener_por_id(compra.metodo_pago_id)
-            if compra.metodo_pago_id
-            else None
-        )
-        lineas = self.lineas.listar_de_compra(compra.id)
+        # Puro acceso a atributos: `comercio`, `metodo_pago` y `lineas` (con
+        # su `categoria`) ya llegan cargados desde `CompraRepository`. Nada
+        # de esto dispara una consulta nueva.
         # Una compra ingerida por correo siempre nace con una sola línea -ver
         # el docstring de CompraDetallada.
-        categoria_id = lineas[0].categoria_id if lineas else None
-        categoria_nombre = None
-        if categoria_id is not None:
-            categoria = self.categorias.obtener_por_id(categoria_id)
-            categoria_nombre = categoria.nombre if categoria else None
+        primera_linea = compra.lineas[0] if compra.lineas else None
+        categoria_id = primera_linea.categoria_id if primera_linea else None
+        categoria = primera_linea.categoria if primera_linea else None
         return CompraDetallada(
             compra=compra,
-            comercio_nombre=comercio.nombre if comercio else "Comercio eliminado",
-            metodo_pago_alias=metodo_pago.alias if metodo_pago else None,
+            comercio_nombre=compra.comercio.nombre if compra.comercio else "Comercio eliminado",
+            metodo_pago_alias=compra.metodo_pago.alias if compra.metodo_pago else None,
             categoria_id=categoria_id,
-            categoria_nombre=categoria_nombre,
+            categoria_nombre=categoria.nombre if categoria else None,
         )

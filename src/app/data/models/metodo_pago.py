@@ -12,11 +12,17 @@ casan con ninguno ya registrado, la compra se crea igual pero marcada
 emparejar.
 """
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
 from app.data.models.enums import Moneda, TipoMetodoPago
+
+if TYPE_CHECKING:
+    from app.data.models.compra import Compra
+    from app.data.models.usuario import Usuario
 
 
 class MetodoPago(Base):
@@ -44,6 +50,12 @@ class MetodoPago(Base):
     entidad: Mapped[str | None] = mapped_column(String(80), nullable=True)
     dia_corte: Mapped[int | None] = mapped_column(nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="metodos_pago", lazy="select")
+    # Sin cascade: MetodoPago no posee las compras que se pagaron con el
+    # -la duena de esas filas es Usuario, este metodo solo se referencia
+    # desde ellas.
+    compras: Mapped[list["Compra"]] = relationship(back_populates="metodo_pago", lazy="select")
 
     def __repr__(self) -> str:
         return f"MetodoPago(usuario_id={self.usuario_id!r}, alias={self.alias!r})"

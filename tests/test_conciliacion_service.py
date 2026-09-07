@@ -27,6 +27,7 @@ from app.data.models.enums import (
 )
 from app.data.models.regla_categorizacion import ReglaCategorizacion
 from app.data.models.usuario import Usuario
+from app.data.repositories.bitacora_repository import BitacoraRepository
 from app.data.repositories.categoria_estandar_repository import CategoriaEstandarRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
@@ -70,7 +71,7 @@ def _armar(sesion: Session, tipo_cambio=None) -> ConciliacionService:
             CategoriaRepository(sesion),
         ),
         tipo_cambio,
-        BitacoraComprasService(None),
+        BitacoraComprasService(BitacoraRepository(None)),
     )
 
 

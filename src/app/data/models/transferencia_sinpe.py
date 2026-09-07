@@ -8,11 +8,15 @@ deduplicación.
 
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.data.models.base import Base
+
+if TYPE_CHECKING:
+    from app.data.models.cuenta_correo import CuentaCorreo
 
 
 class TransferenciaSinpe(Base):
@@ -52,6 +56,12 @@ class TransferenciaSinpe(Base):
     # False si salió del lector genérico (`transferencia_sinpe.py`), no de un
     # lector validado contra una notificación real de ese banco.
     confirmado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Sin cascade: la duena es CuentaCorreo (ver su cascade="all,
+    # delete-orphan"), esta es la vista desde aca del mismo vinculo.
+    cuenta_correo: Mapped["CuentaCorreo"] = relationship(
+        back_populates="transferencias_sinpe", lazy="select"
+    )
 
     def __repr__(self) -> str:
         return (

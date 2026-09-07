@@ -334,7 +334,12 @@ class ConciliacionService:
                 )
             if not metodo_pago.activo:
                 raise ReglaDeNegocioViolada("Ese método de pago está desactivado.")
-            compra.metodo_pago_id = metodo_pago.id
+            # Por la relación, no por la columna: `compra` ya llegó con
+            # `metodo_pago` cargado (la trae `CompraRepository.obtener_de_usuario`
+            # con joinedload), y asignar solo `metodo_pago_id` dejaría ese
+            # atributo desactualizado -la siguiente lectura en esta misma
+            # sesión seguiría viendo el método de pago viejo.
+            compra.metodo_pago = metodo_pago
 
         lineas = self.lineas.listar_de_compra(compra.id)
         linea_principal = lineas[0] if lineas else None
@@ -349,7 +354,11 @@ class ConciliacionService:
                 raise ReglaDeNegocioViolada("La categoría tiene que ser una hoja, no un grupo.")
             if linea_principal is None:
                 raise ReglaDeNegocioViolada("Esta compra no tiene ningún renglón que categorizar.")
-            linea_principal.categoria_id = categoria.id
+            # Por la relación, no por la columna -mismo motivo que
+            # `compra.metodo_pago` unas líneas arriba: `linea_principal` ya
+            # llegó con `categoria` cargada (vía `compra.lineas` en
+            # `obtener_de_usuario`).
+            linea_principal.categoria = categoria
             linea_principal.categorizada_automaticamente = False
 
             if categoria_anterior_id is None:
@@ -361,6 +370,12 @@ class ConciliacionService:
                     consumido_antes = presupuesto.monto_consumido
                     presupuesto.monto_consumido = presupuesto.monto_consumido + compra.total
                     consumido_despues = presupuesto.monto_consumido
+
+        # SQLAlchemy solo sincroniza la columna de la llave foránea (`metodo_pago_id`,
+        # `categoria_id`) a partir de la relación en el flush -asignar
+        # `compra.metodo_pago`/`linea_principal.categoria` arriba no las deja
+        # listas todavía para las comparaciones de abajo sin este flush.
+        self.compras.sesion.flush()
 
         requiere_revision_antes = compra.requiere_revision
         compra.requiere_revision = compra.metodo_pago_id is None or (

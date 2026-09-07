@@ -33,6 +33,7 @@ from app.config.database import obtener_sesion
 from app.config.settings import obtener_configuracion
 from app.data.models.enums import ProveedorCorreo
 from app.data.models.usuario import Usuario
+from app.data.repositories.bitacora_repository import BitacoraRepository
 from app.data.repositories.categoria_estandar_repository import CategoriaEstandarRepository
 from app.data.repositories.categoria_repository import CategoriaRepository
 from app.data.repositories.comercio_categoria_repository import ComercioCategoriaRepository
@@ -140,19 +141,12 @@ ServicioDeMetodosPago = Annotated[MetodoPagoService, Depends(obtener_servicio_de
 def obtener_servicio_de_compras(sesion: SesionDependencia) -> CompraService:
     """Arma el servicio de lectura de compras sobre la sesion actual.
 
-    Necesita los repositorios de comercio, método de pago, línea y categoría
-    -aparte de `Compra` mismo- porque una fila de la lista o el detalle de
-    una compra resuelve sus nombres (no solo sus ids sueltos): es lo que
-    hace que `Compra` deje de ser visible solo a través de su bitácora.
+    Solo necesita `CompraRepository`: los nombres de comercio, método de pago
+    y categoría que antes pedía a cuatro repositorios aparte ahora llegan ya
+    resueltos por la carga ansiosa de la propia consulta -ver
+    `CompraRepository._con_detalle_cargado`.
     """
-    return CompraService(
-        CompraRepository(sesion),
-        LineaCompraRepository(sesion),
-        ComercioRepository(sesion),
-        MetodoPagoRepository(sesion),
-        CategoriaRepository(sesion),
-        UsuarioRepository(sesion),
-    )
+    return CompraService(CompraRepository(sesion))
 
 
 ServicioDeCompras = Annotated[CompraService, Depends(obtener_servicio_de_compras)]
@@ -181,7 +175,7 @@ def obtener_servicio_de_bitacora() -> BitacoraComprasService:
     perezosa- así que este servicio siempre se puede construir, incluso si
     Mongo termina no respondiendo cuando de verdad se intenta escribir.
     """
-    return BitacoraComprasService(obtener_coleccion_bitacora())
+    return BitacoraComprasService(BitacoraRepository(obtener_coleccion_bitacora()))
 
 
 ServicioDeBitacora = Annotated[BitacoraComprasService, Depends(obtener_servicio_de_bitacora)]

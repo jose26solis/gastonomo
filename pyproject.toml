@@ -38,6 +38,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    # levanta un postgres:16-alpine real en Docker para las pruebas de
+    # tests/integracion/ -lo que SQLite no puede probar igual de bien
+    # (NUMERIC exacto, ON DELETE CASCADE, largo de VARCHAR, ROLLBACK real).
+    "testcontainers[postgres]>=4.7",
 ]
 
 [tool.setuptools.packages.find]
@@ -53,3 +57,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "integracion: contra un postgres:16-alpine real levantado con Testcontainers; necesita Docker (se saltan solas si no hay).",
+]

@@ -12,7 +12,12 @@ from app.data.models.tipos import FechaHoraUTC
 
 if TYPE_CHECKING:
     from app.data.models.categoria import Categoria
+    from app.data.models.comercio_categoria_sugerida import ComercioCategoriaSugerida
+    from app.data.models.compra import Compra
     from app.data.models.cuenta_correo import CuentaCorreo
+    from app.data.models.metodo_pago import MetodoPago
+    from app.data.models.presupuesto import Presupuesto
+    from app.data.models.regla_categorizacion import ReglaCategorizacion
 
 
 class Usuario(Base):
@@ -52,11 +57,30 @@ class Usuario(Base):
         FechaHoraUTC, nullable=False, default=lambda: datetime.now(UTC)
     )
 
+    # Todas cascade="all, delete-orphan": Usuario es la raiz de aislamiento y
+    # el unico dueno real de estas filas -borrar la cuenta borra su historial
+    # completo. Comercio y CategoriaEstandar, en cambio, son catalogos
+    # compartidos y nunca cascadan desde aca (ver sus propios modelos).
     categorias: Mapped[list["Categoria"]] = relationship(
-        back_populates="usuario", cascade="all, delete-orphan"
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
     )
     cuentas_correo: Mapped[list["CuentaCorreo"]] = relationship(
-        back_populates="usuario", cascade="all, delete-orphan"
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
+    )
+    metodos_pago: Mapped[list["MetodoPago"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
+    )
+    compras: Mapped[list["Compra"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
+    )
+    presupuestos: Mapped[list["Presupuesto"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
+    )
+    reglas_categorizacion: Mapped[list["ReglaCategorizacion"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
+    )
+    comercio_categorias_sugeridas: Mapped[list["ComercioCategoriaSugerida"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", lazy="select"
     )
 
     def __repr__(self) -> str:
