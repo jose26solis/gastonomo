@@ -18,9 +18,12 @@ from app.presentation.schemas import (
     CallbackGoogleRequest,
     CambiarContrasenaRequest,
     IniciarSesionRequest,
+    MensajeGenericoResponse,
     PreferenciaSinpeRequest,
     RegistrarUsuarioRequest,
+    RestablecerContrasenaRequest,
     SesionResponse,
+    SolicitarRecuperacionRequest,
     UrlDeAutorizacionResponse,
     UsuarioResponse,
 )
@@ -95,6 +98,38 @@ def cambiar_contrasena(
         usuario_actual, peticion.contrasena_actual, peticion.contrasena_nueva
     )
     return _respuesta_de_usuario(usuario_actual)
+
+
+@router.post(
+    "/recuperar/solicitar",
+    response_model=MensajeGenericoResponse,
+    summary="Pedir el enlace para restablecer una contraseña olvidada",
+)
+def solicitar_recuperacion_contrasena(
+    peticion: SolicitarRecuperacionRequest, servicio: ServicioDeAuth
+) -> MensajeGenericoResponse:
+    """Público -nadie está logueado todavía, es justo lo que este flujo resuelve
+    para quien perdió el acceso. Responde siempre el mismo mensaje, exista o no
+    una cuenta con ese correo -ver la nota en `AuthService.solicitar_recuperacion_contrasena`."""
+    servicio.solicitar_recuperacion_contrasena(peticion.correo)
+    return MensajeGenericoResponse(
+        mensaje="Si existe una cuenta con ese correo, te enviamos un enlace para "
+        "restablecer la contraseña."
+    )
+
+
+@router.post(
+    "/recuperar/confirmar",
+    response_model=SesionResponse,
+    summary="Confirmar el enlace y dejar la cuenta con la contraseña nueva",
+)
+def confirmar_recuperacion_contrasena(
+    peticion: RestablecerContrasenaRequest, servicio: ServicioDeAuth
+) -> SesionResponse:
+    """Público por lo mismo: el `token` del enlace -no un encabezado de sesión- es
+    lo que demuestra quién es el titular acá."""
+    sesion = servicio.restablecer_contrasena(peticion.token, peticion.contrasena_nueva)
+    return _respuesta_de_sesion(sesion.token, sesion.usuario)
 
 
 @router.post(

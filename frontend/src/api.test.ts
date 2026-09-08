@@ -116,6 +116,30 @@ describe("api", () => {
     );
   });
 
+  it("solicitarRecuperacionContrasena manda el correo al endpoint de recuperar/solicitar", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(respuestaOk({ mensaje: "listo" }));
+
+    await api.solicitarRecuperacionContrasena("ana@ejemplo.cr");
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("http://localhost:8000/api/auth/recuperar/solicitar");
+    expect(init).toMatchObject({ method: "POST" });
+    expect(JSON.parse(init!.body as string)).toEqual({ correo: "ana@ejemplo.cr" });
+  });
+
+  it("restablecerContrasena manda el token y la contraseña nueva a recuperar/confirmar", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(respuestaOk({ token: "t", usuario: { id: 1 } }));
+
+    await api.restablecerContrasena("token-del-enlace", "clave-nueva-123");
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("http://localhost:8000/api/auth/recuperar/confirmar");
+    expect(JSON.parse(init!.body as string)).toEqual({
+      token: "token-del-enlace",
+      contrasena_nueva: "clave-nueva-123",
+    });
+  });
+
   it("una respuesta 204 no intenta parsear un cuerpo", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: true, status: 204, json: () => Promise.reject() } as unknown as Response);
 

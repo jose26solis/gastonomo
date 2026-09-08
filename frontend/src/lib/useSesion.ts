@@ -58,6 +58,12 @@ export function useSesion() {
     guardarSesion(await api.completarLoginGoogle(codigo, estado));
   }
 
+  /** Llamado desde `RestablecerContrasena.tsx` tras confirmar el enlace de
+   * recuperación -deja al titular ya logueado, mismo criterio que registrarse. */
+  async function restablecerContrasena(token: string, contrasenaNueva: string) {
+    guardarSesion(await api.restablecerContrasena(token, contrasenaNueva));
+  }
+
   /**
    * Refleja en la sesión un cambio de perfil que no vino con un token nuevo
    * -vincular o desvincular Google, cambiar la contraseña. El token sigue
@@ -83,6 +89,7 @@ export function useSesion() {
     registrar,
     iniciarSesion,
     iniciarSesionConGoogle,
+    restablecerContrasena,
     actualizarUsuario,
     cerrarSesion,
   };

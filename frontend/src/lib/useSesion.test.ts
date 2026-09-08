@@ -8,7 +8,13 @@ vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
   return {
     ...actual,
-    api: { yo: vi.fn(), registrar: vi.fn(), iniciarSesion: vi.fn(), completarLoginGoogle: vi.fn() },
+    api: {
+      yo: vi.fn(),
+      registrar: vi.fn(),
+      iniciarSesion: vi.fn(),
+      completarLoginGoogle: vi.fn(),
+      restablecerContrasena: vi.fn(),
+    },
   };
 });
 
@@ -75,6 +81,23 @@ describe("useSesion", () => {
 
     expect(result.current.usuario).toEqual(usuario());
     expect(window.localStorage.getItem(CLAVE_TOKEN)).toBe("nuevo-token");
+  });
+
+  it("restablecerContrasena guarda el token nuevo y deja al titular ya logueado", async () => {
+    vi.mocked(api.restablecerContrasena).mockResolvedValue({
+      token: "token-de-recuperacion-confirmada",
+      usuario: usuario(),
+    });
+    const { result } = renderHook(() => useSesion());
+    await waitFor(() => expect(result.current.cargando).toBe(false));
+
+    await act(async () => {
+      await result.current.restablecerContrasena("token-del-enlace", "clave-nueva-123");
+    });
+
+    expect(api.restablecerContrasena).toHaveBeenCalledWith("token-del-enlace", "clave-nueva-123");
+    expect(result.current.usuario).toEqual(usuario());
+    expect(window.localStorage.getItem(CLAVE_TOKEN)).toBe("token-de-recuperacion-confirmada");
   });
 
   it("cerrarSesion borra el token y el usuario, sin llamar al servidor", async () => {

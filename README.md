@@ -403,6 +403,8 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `POST` | `/api/auth/iniciar-sesion` | Verifica correo y contraseña, devuelve una sesión nueva |
 | `GET` | `/api/auth/yo` | Confirma un token guardado y trae los datos del titular dueño |
 | `POST` | `/api/auth/contrasena` | Cambia la contraseña, o le pone una por primera vez a una cuenta de solo Google |
+| `POST` | `/api/auth/recuperar/solicitar` | Pide el enlace para restablecer una contraseña olvidada (público; mismo mensaje exista o no la cuenta) |
+| `POST` | `/api/auth/recuperar/confirmar` | Confirma el enlace y deja la cuenta con la contraseña nueva, ya con sesión iniciada (público: el `token` del enlace es lo que demuestra quién es) |
 | `GET` | `/api/auth/google/iniciar` | URL de Google para "Iniciar sesión con Google" (público) |
 | `POST` | `/api/auth/google/callback` | Completa el login con Google -crea la cuenta si es la primera vez |
 | `GET` | `/api/auth/google/vincular/iniciar` | URL de Google para vincular login con Google a la cuenta ya logueada |
@@ -446,7 +448,8 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/reglas-categorizacion?usuario_id=1` | Lista las reglas de categorización del titular, en orden de prioridad |
 | `DELETE` | `/api/reglas-categorizacion/{id}?usuario_id=1` | Desactiva una regla (conserva `veces_aplicada` como historial) |
 
-`/api/salud` y los tres de `/api/auth` no necesitan sesión. **Todo lo demás sí**: hace falta el
+`/api/salud` y los públicos de `/api/auth` (registro, login, recuperar contraseña, y el handshake
+de Google) no necesitan sesión. **Todo lo demás sí**: hace falta el
 encabezado `Authorization: Bearer <token>` de una sesión iniciada como el mismo `usuario_id` que se
 le pide -ver [Registro y varios usuarios](#registro-y-varios-usuarios) más arriba. Todo lo que lee
 correo bajo `/api/cuentas-correo/…` además necesita al menos un buzón ya vinculado con credenciales
@@ -939,9 +942,11 @@ Pendiente:
 - [x] Registro e inicio de sesión reales -ver [Registro y varios usuarios](#registro-y-varios-usuarios) más abajo
 - [x] Iniciar sesión con Google, y cambiar/poner contraseña ya logueado -ver
       [Registro y varios usuarios](#registro-y-varios-usuarios)
-- [ ] Roles (titular, administrador) — hoy todo titular ve y administra solo lo suyo, sin niveles
-- [ ] Recuperar una contraseña olvidada -hoy hace falta estar logueado para cambiarla; si no hay
-      ninguna sesión con ese correo, no hay forma de recuperar el acceso
+- [x] Recuperar una contraseña olvidada -"¿Olvidaste tu contraseña?" en Login manda un enlace de
+      un solo uso (30 minutos) a `AuthService.solicitar_recuperacion_contrasena`; sin
+      `GASTONOMO_SMTP_HOST` configurado, el enlace se loguea en la consola del backend en vez de
+      mandarse por correo -ver [`correo_saliente.py`](src/app/business/services/correo_saliente.py)-
+      así que el flujo se puede probar entero en local sin montar un servidor de correo.
 - [x] Pruebas automatizadas de frontend -ver [Correr las pruebas y el linter](#5-correr-las-pruebas-y-el-linter)
 - [ ] Desglose manual de una compra en varias líneas -`LineaCompra` ya soporta varias por `Compra`
       en el modelo, pero todavía no hay pantalla para partir un cargo; toda compra ingerida por

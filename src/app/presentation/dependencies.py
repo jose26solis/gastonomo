@@ -21,6 +21,7 @@ from app.business.services.conciliacion_service import ConciliacionService
 from app.business.services.correo.gmail import GmailProveedor
 from app.business.services.correo.outlook import OutlookProveedor
 from app.business.services.correo.proveedor import ProveedorDeCorreo
+from app.business.services.correo_saliente import EnviarCorreoService
 from app.business.services.cuenta_correo_service import CuentaCorreoService
 from app.business.services.identidad_google import IdentidadGoogleProveedor
 from app.business.services.metodo_pago_service import MetodoPagoService
@@ -244,7 +245,13 @@ def obtener_servicio_de_auth(
     google = (
         IdentidadGoogleProveedor(cliente, configuracion) if configuracion.google_client_id else None
     )
-    return AuthService(UsuarioRepository(sesion), google, obtener_servicio_de_categorias(sesion))
+    return AuthService(
+        UsuarioRepository(sesion),
+        google,
+        obtener_servicio_de_categorias(sesion),
+        EnviarCorreoService(configuracion),
+        configuracion.frontend_url,
+    )
 
 
 ServicioDeAuth = Annotated[AuthService, Depends(obtener_servicio_de_auth)]

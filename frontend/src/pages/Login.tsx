@@ -138,6 +138,15 @@ export function Login({
                 ? "Crear cuenta"
                 : "Iniciar sesión"}
           </button>
+
+          {modo === "iniciar-sesion" && (
+            <a
+              href="/olvide-contrasena"
+              style={{ fontSize: 11.5, color: "var(--color-accent-200)", textAlign: "left" }}
+            >
+              ¿Olvidaste tu contraseña?
+            </a>
+          )}
         </form>
 
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>

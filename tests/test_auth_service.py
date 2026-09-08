@@ -417,3 +417,132 @@ def test_cambiar_contrasena_nueva_demasiado_corta_se_rechaza(servicio: AuthServi
 
     with pytest.raises(DatosInvalidos):
         servicio.cambiar_contrasena(resultado.usuario, "contrasena-segura", "corta")
+
+
+# ---- Recuperar contraseña olvidada ----
+
+
+def test_solicitar_recuperacion_de_un_correo_que_no_existe_no_lanza_nada(
+    servicio: AuthService,
+) -> None:
+    """Mismo motivo que iniciar_sesion: no puede confirmarle a quien pregunta si
+    ese correo específico tiene cuenta o no -ni con un error, ni con ninguno."""
+    servicio.solicitar_recuperacion_contrasena("nadie@ejemplo.cr")
+
+
+def test_solicitar_recuperacion_de_una_cuenta_desactivada_no_lanza_nada(
+    servicio: AuthService, sesion: Session
+) -> None:
+    resultado = _registrar(servicio)
+    resultado.usuario.activo = False
+    sesion.commit()
+
+    servicio.solicitar_recuperacion_contrasena(resultado.usuario.correo)
+
+
+def test_solicitar_recuperacion_sin_servicio_de_correo_configurado_no_lanza_nada(
+    servicio: AuthService,
+) -> None:
+    """`servicio` (sin doble de correo) es el caso "SMTP no configurado" -degrada
+    a loguear el enlace, ver EnviarCorreoService; nunca debería reventar por eso."""
+    _registrar(servicio)
+
+    servicio.solicitar_recuperacion_contrasena("ana@ejemplo.cr")
+
+
+def test_solicitar_recuperacion_manda_el_enlace_por_el_servicio_de_correo(
+    sesion: Session,
+) -> None:
+    enviados: list[tuple[str, str, str]] = []
+
+    class CorreoFalso:
+        def enviar(self, destinatario: str, asunto: str, cuerpo: str) -> None:
+            enviados.append((destinatario, asunto, cuerpo))
+
+    servicio = AuthService(UsuarioRepository(sesion), correo=CorreoFalso())
+    resultado = _registrar(servicio)
+
+    servicio.solicitar_recuperacion_contrasena(resultado.usuario.correo)
+
+    assert len(enviados) == 1
+    destinatario, asunto, cuerpo = enviados[0]
+    assert destinatario == "ana@ejemplo.cr"
+    assert "restablecer" in asunto.lower()
+    assert "/restablecer-contrasena?token=" in cuerpo
+
+
+def test_restablecer_contrasena_con_un_enlace_valido_cambia_la_contrasena(
+    sesion: Session,
+) -> None:
+    capturado: dict[str, str] = {}
+
+    class CorreoFalso:
+        def enviar(self, destinatario: str, asunto: str, cuerpo: str) -> None:
+            capturado["cuerpo"] = cuerpo
+
+    servicio = AuthService(UsuarioRepository(sesion), correo=CorreoFalso())
+    resultado = _registrar(servicio)
+    servicio.solicitar_recuperacion_contrasena(resultado.usuario.correo)
+    token = capturado["cuerpo"].split("token=")[1].split()[0]
+
+    sesion_nueva = servicio.restablecer_contrasena(token, "otra-contrasena-nueva")
+
+    assert sesion_nueva.usuario.id == resultado.usuario.id
+    assert sesion_nueva.token
+    reingreso = servicio.iniciar_sesion(
+        IniciarSesionComando(correo="ana@ejemplo.cr", contrasena="otra-contrasena-nueva")
+    )
+    assert reingreso.usuario.id == resultado.usuario.id
+
+
+def test_restablecer_contrasena_con_un_token_ilegible_se_rechaza(servicio: AuthService) -> None:
+    with pytest.raises(DatosInvalidos):
+        servicio.restablecer_contrasena("esto-no-es-un-token-valido", "otra-contrasena-nueva")
+
+
+def test_restablecer_contrasena_con_un_token_vencido_se_rechaza(
+    servicio: AuthService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mismo ajuste de tiempo que el TTL de sesión: 2.5s de espera, no 1.5s, por la
+    resolución de un segundo entero con la que Fernet marca el tiempo."""
+    monkeypatch.setattr("app.business.services.auth_service._TTL_RECUPERACION_SEGUNDOS", 1)
+    token = cifrar(json.dumps({"usuario_id": 1, "proposito": "recuperar-contrasena"}))
+
+    time.sleep(2.5)
+
+    with pytest.raises(DatosInvalidos):
+        servicio.restablecer_contrasena(token, "otra-contrasena-nueva")
+
+
+def test_restablecer_contrasena_con_un_token_de_otro_proposito_se_rechaza(
+    servicio: AuthService, usuario: Usuario
+) -> None:
+    """Fija la misma protección contra confusión de tokens que ya existe entre
+    sesión y los `state` de OAuth2 -acá, contra el propio token de sesión."""
+    token_de_sesion = cifrar(json.dumps({"usuario_id": usuario.id, "proposito": "sesion"}))
+
+    with pytest.raises(DatosInvalidos):
+        servicio.restablecer_contrasena(token_de_sesion, "otra-contrasena-nueva")
+
+
+def test_restablecer_contrasena_nueva_demasiado_corta_se_rechaza(
+    servicio: AuthService, usuario: Usuario
+) -> None:
+    token = cifrar(json.dumps({"usuario_id": usuario.id, "proposito": "recuperar-contrasena"}))
+
+    with pytest.raises(DatosInvalidos):
+        servicio.restablecer_contrasena(token, "corta")
+
+
+def test_restablecer_contrasena_de_una_cuenta_desactivada_se_rechaza(
+    servicio: AuthService, sesion: Session
+) -> None:
+    resultado = _registrar(servicio)
+    resultado.usuario.activo = False
+    sesion.commit()
+    token = cifrar(
+        json.dumps({"usuario_id": resultado.usuario.id, "proposito": "recuperar-contrasena"})
+    )
+
+    with pytest.raises(DatosInvalidos):
+        servicio.restablecer_contrasena(token, "otra-contrasena-nueva")

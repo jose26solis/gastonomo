@@ -15,6 +15,7 @@ JWT sin lista de revocación.
 """
 
 import json
+import logging
 import secrets
 from dataclasses import dataclass
 
@@ -22,9 +23,12 @@ from app.business.errors import CredencialesInvalidas, DatosInvalidos, ReglaDeNe
 from app.business.seguridad.cifrado import TokenIlegible, cifrar, descifrar
 from app.business.seguridad.contrasenas import hashear_contrasena, verificar_contrasena
 from app.business.services.categoria_service import CategoriaService
+from app.business.services.correo_saliente import EnviarCorreoService
 from app.business.services.identidad_google import IdentidadGoogleProveedor
 from app.data.models.usuario import Usuario
 from app.data.repositories.usuario_repository import UsuarioRepository
+
+logger = logging.getLogger(__name__)
 
 # 30 días: una sesión de un tracker de gastos personal, en un solo
 # dispositivo, no necesita expirar cada pocas horas como la de un banco. El
@@ -52,6 +56,13 @@ _PROPOSITO_SESION = "sesion"
 _PROPOSITO_LOGIN_GOOGLE = "login-google"
 _PROPOSITO_VINCULAR_GOOGLE = "vincular-google"
 _TTL_ESTADO_GOOGLE_SEGUNDOS = 600  # 10 minutos: de sobra para el handshake, poco para reusar
+
+# El enlace de "Olvidé mi contraseña" viaja por correo -un canal que cualquiera
+# con acceso a esa bandeja puede reabrir después- así que vive mucho menos que
+# la sesión de 30 días que arma: 30 minutos es de sobra para que quien lo pidió
+# lo use, y poco para que un enlace viejo en la bandeja siga sirviendo.
+_PROPOSITO_RECUPERAR_CONTRASENA = "recuperar-contrasena"
+_TTL_RECUPERACION_SEGUNDOS = 60 * 30
 
 
 @dataclass(frozen=True)
@@ -87,6 +98,8 @@ class AuthService:
         usuario_repository: UsuarioRepository,
         google: IdentidadGoogleProveedor | None = None,
         categoria_service: CategoriaService | None = None,
+        correo: EnviarCorreoService | None = None,
+        frontend_url: str = "http://localhost:5173",
     ) -> None:
         self.usuarios = usuario_repository
         # Opcional a propósito, igual que los proveedores de correo: sin
@@ -97,6 +110,10 @@ class AuthService:
         # servicio a mano en las pruebas: sin él, una cuenta nueva se sigue
         # creando igual, solo que sin el catálogo semilla de categorías.
         self.categoria_service = categoria_service
+        # Opcional por el mismo motivo -sin él, `solicitar_recuperacion_contrasena`
+        # loguea el enlace en vez de mandarlo (ver el método).
+        self.correo = correo
+        self.frontend_url = frontend_url
 
     def registrar(self, comando: RegistrarUsuarioComando) -> Sesion:
         """Crea la cuenta y devuelve una sesión ya iniciada -no hace falta loguearse aparte."""
@@ -255,6 +272,67 @@ class AuthService:
             )
         usuario.contrasena_hash = hashear_contrasena(contrasena_nueva)
         self.usuarios.sesion.commit()
+
+    def solicitar_recuperacion_contrasena(self, correo: str) -> None:
+        """Arma el enlace de "Olvidé mi contraseña" y lo manda (o lo loguea, ver
+        `EnviarCorreoService`) al dueño de esa cuenta -si existe.
+
+        Nunca revela si el correo tiene cuenta: si no existe, o la cuenta está
+        desactivada, este método simplemente no hace nada y no lanza ningún
+        error -mismo motivo que `iniciar_sesion` no distingue "no existe" de
+        "contraseña incorrecta". El router responde siempre el mismo mensaje
+        genérico, haya encontrado la cuenta o no.
+        """
+        usuario = self.usuarios.buscar_por_correo(_normalizar_correo(correo))
+        if usuario is None or not usuario.activo:
+            return
+
+        token = cifrar(
+            json.dumps({"usuario_id": usuario.id, "proposito": _PROPOSITO_RECUPERAR_CONTRASENA})
+        )
+        enlace = f"{self.frontend_url}/restablecer-contrasena?token={token}"
+        cuerpo = (
+            f"Hola {usuario.nombre_completo},\n\n"
+            "Alguien -esperamos que vos- pidió restablecer la contraseña de tu cuenta "
+            f"de Gastonomo. Este enlace vale por 30 minutos:\n\n{enlace}\n\n"
+            "Si no fuiste vos, podés ignorar este correo: tu contraseña actual sigue "
+            "funcionando igual."
+        )
+        if self.correo is not None:
+            self.correo.enviar(usuario.correo, "Restablecer tu contraseña de Gastonomo", cuerpo)
+        else:
+            logger.warning("Envío de correo no configurado. Enlace de recuperación: %s", enlace)
+
+    def restablecer_contrasena(self, token: str, contrasena_nueva: str) -> Sesion:
+        """Confirma el enlace de recuperación y deja la cuenta con la contraseña nueva.
+
+        Devuelve una sesión ya iniciada -mismo criterio que `registrar`: quien
+        llega hasta acá con un enlace válido y sin vencer ya demostró tener
+        acceso a esa bandeja de entrada, así que no hace falta que además
+        vuelva a loguearse a mano con la contraseña que recién puso.
+        """
+        try:
+            datos = json.loads(descifrar(token, ttl_segundos=_TTL_RECUPERACION_SEGUNDOS))
+            if datos.get("proposito") != _PROPOSITO_RECUPERAR_CONTRASENA:
+                raise ValueError("proposito de token inesperado")
+            usuario_id = int(datos["usuario_id"])
+        except (TokenIlegible, ValueError, KeyError, TypeError) as error:
+            raise DatosInvalidos(
+                "El enlace para restablecer la contraseña no es válido o venció."
+            ) from error
+
+        if len(contrasena_nueva) < _LARGO_MINIMO_CONTRASENA:
+            raise DatosInvalidos(
+                f"La contraseña debe tener al menos {_LARGO_MINIMO_CONTRASENA} caracteres."
+            )
+
+        usuario = self.usuarios.obtener_por_id(usuario_id)
+        if usuario is None or not usuario.activo:
+            raise DatosInvalidos("El enlace para restablecer la contraseña no es válido o venció.")
+
+        usuario.contrasena_hash = hashear_contrasena(contrasena_nueva)
+        self.usuarios.sesion.commit()
+        return Sesion(token=self._token_de(usuario), usuario=usuario)
 
     def actualizar_preferencia_sinpe(self, usuario: Usuario, activo: bool) -> Usuario:
         """Prende o apaga la lectura de transferencias SINPE para este titular.

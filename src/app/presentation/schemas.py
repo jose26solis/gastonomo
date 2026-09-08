@@ -84,6 +84,27 @@ class CambiarContrasenaRequest(BaseModel):
     contrasena_nueva: str = Field(min_length=1, max_length=72)
 
 
+class SolicitarRecuperacionRequest(BaseModel):
+    """Cuerpo de POST /api/auth/recuperar/solicitar."""
+
+    correo: str = Field(min_length=1, max_length=180)
+
+
+class RestablecerContrasenaRequest(BaseModel):
+    """Cuerpo de POST /api/auth/recuperar/confirmar. `token` es el que viaja en el
+    enlace que se mandó por correo -ver `AuthService.solicitar_recuperacion_contrasena`."""
+
+    token: str = Field(min_length=1)
+    contrasena_nueva: str = Field(min_length=1, max_length=72)
+
+
+class MensajeGenericoResponse(BaseModel):
+    """Respuesta de un endpoint que a propósito no dice más que "listo" -ver
+    `solicitar_recuperacion_contrasena`: nunca hay que revelar si un correo tiene cuenta."""
+
+    mensaje: str
+
+
 class UsuarioResponse(BaseModel):
     """El titular autenticado, sin su hash de contraseña.
 

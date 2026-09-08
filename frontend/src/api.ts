@@ -18,6 +18,7 @@ import type {
   EstadoDePresupuesto,
   EventoBitacora,
   IniciarVinculacionResponse,
+  MensajeGenerico,
   MensajeResumido,
   MetodoPago,
   Presupuesto,
@@ -172,6 +173,26 @@ export const api = {
         contrasena_actual: contrasenaActual,
         contrasena_nueva: contrasenaNueva,
       }),
+    });
+  },
+
+  /** Pide el enlace de recuperación. Siempre responde el mismo mensaje genérico,
+   * exista o no una cuenta con ese correo -ver la nota en el router del backend. */
+  solicitarRecuperacionContrasena(correo: string): Promise<MensajeGenerico> {
+    return peticion("/api/auth/recuperar/solicitar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ correo }),
+    });
+  },
+
+  /** Confirma el `token` del enlace y deja la cuenta con la contraseña nueva -ya
+   * con una sesión iniciada, no hace falta loguearse aparte después. */
+  restablecerContrasena(token: string, contrasenaNueva: string): Promise<Sesion> {
+    return peticion("/api/auth/recuperar/confirmar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, contrasena_nueva: contrasenaNueva }),
     });
   },
 

@@ -239,6 +239,12 @@ export interface Sesion {
   usuario: Usuario;
 }
 
+/** Respuesta de POST /api/auth/recuperar/solicitar -a propósito no dice más que
+ * "listo": nunca revela si el correo pedido tiene cuenta o no. */
+export interface MensajeGenerico {
+  mensaje: string;
+}
+
 export interface TipoDeCambio {
   fecha: string;
   compra: string;

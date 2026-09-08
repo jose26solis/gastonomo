@@ -100,6 +100,24 @@ class Configuracion:
     mongo_url: str = "mongodb://gastonomo:gastonomo_local@localhost:27017"
     mongo_db: str = "gastonomo_app"
 
+    # SMTP para correo saliente -hoy solo lo usa "Recuperar contraseña" para
+    # mandar el enlace. Sin `smtp_host`, `EnviarCorreoService` no manda nada
+    # de verdad: loguea el enlace en su lugar, igual que la conversión de
+    # moneda sin suscripción del BCCR. Ningún valor de desarrollo posible acá
+    # tampoco -un servidor SMTP real es tan tuyo como las credenciales de
+    # Outlook/Gmail- así que quedan sin default distinto de "".
+    smtp_host: str = ""
+    smtp_puerto: int = 587
+    smtp_usuario: str = ""
+    smtp_contrasena: str = ""
+    smtp_remitente: str = ""
+
+    # Origen del frontend, para armar enlaces que el titular abre desde un
+    # correo (hoy solo el de recuperar contraseña). No es lo mismo que
+    # `origenes_permitidos`: ese es CORS (puede llevar varios orígenes), este
+    # es uno solo -a cuál de ellos apuntar en el enlace que se manda afuera.
+    frontend_url: str = "http://localhost:5173"
+
 
 @lru_cache
 def obtener_configuracion() -> Configuracion:
@@ -151,6 +169,12 @@ def obtener_configuracion() -> Configuracion:
             "GASTONOMO_MONGO_URL", "mongodb://gastonomo:gastonomo_local@localhost:27017"
         ),
         mongo_db=os.getenv("GASTONOMO_MONGO_DB", "gastonomo_app"),
+        smtp_host=os.getenv("GASTONOMO_SMTP_HOST", ""),
+        smtp_puerto=int(os.getenv("GASTONOMO_SMTP_PUERTO", "587")),
+        smtp_usuario=os.getenv("GASTONOMO_SMTP_USUARIO", ""),
+        smtp_contrasena=os.getenv("GASTONOMO_SMTP_CONTRASENA", ""),
+        smtp_remitente=os.getenv("GASTONOMO_SMTP_REMITENTE", ""),
+        frontend_url=os.getenv("GASTONOMO_FRONTEND_URL", "http://localhost:5173"),
     )
 
 

@@ -5,6 +5,8 @@ import { CallbackVinculacion } from "./pages/CallbackVinculacion";
 import { PoliticaDePrivacidad } from "./pages/legal/PoliticaDePrivacidad";
 import { TerminosDeUso } from "./pages/legal/TerminosDeUso";
 import { Login } from "./pages/Login";
+import { OlvideContrasena } from "./pages/OlvideContrasena";
+import { RestablecerContrasena } from "./pages/RestablecerContrasena";
 
 /**
  * Enrutamiento manual por `pathname`.
@@ -25,6 +27,7 @@ export function App() {
     registrar,
     iniciarSesion,
     iniciarSesionConGoogle,
+    restablecerContrasena,
     actualizarUsuario,
     cerrarSesion,
   } = useSesion();
@@ -37,6 +40,12 @@ export function App() {
   }
   if (pathname === "/iniciar-sesion/google/callback") {
     return <CallbackGoogle onIniciarSesionConGoogle={iniciarSesionConGoogle} />;
+  }
+  if (pathname === "/olvide-contrasena") {
+    return <OlvideContrasena />;
+  }
+  if (pathname === "/restablecer-contrasena") {
+    return <RestablecerContrasena onRestablecerContrasena={restablecerContrasena} />;
   }
   if (pathname === "/privacidad") {
     return <PoliticaDePrivacidad />;

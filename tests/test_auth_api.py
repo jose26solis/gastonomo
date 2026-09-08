@@ -261,3 +261,78 @@ def test_apagar_la_preferencia_sinpe(cliente: TestClient) -> None:
 
     assert respuesta.status_code == 200
     assert respuesta.json()["leer_transferencias_sinpe"] is False
+
+
+# ---- Recuperar contraseña olvidada ----
+
+
+def _con_correo_falso(sesion) -> list[tuple[str, str, str]]:
+    """Sustituye AuthService por uno con un doble de correo saliente, sobre la
+    misma sesión de la prueba -mismo patrón que `_con_google_falso`."""
+    enviados: list[tuple[str, str, str]] = []
+
+    class CorreoFalso:
+        def enviar(self, destinatario: str, asunto: str, cuerpo: str) -> None:
+            enviados.append((destinatario, asunto, cuerpo))
+
+    def _armar() -> AuthService:
+        return AuthService(UsuarioRepository(sesion), correo=CorreoFalso())
+
+    app.dependency_overrides[obtener_servicio_de_auth] = _armar
+    return enviados
+
+
+def test_solicitar_recuperacion_da_200_con_el_mismo_mensaje_exista_o_no_la_cuenta(
+    cliente: TestClient, usuario: Usuario, sesion
+) -> None:
+    _con_correo_falso(sesion)
+    try:
+        con_cuenta = cliente.post("/api/auth/recuperar/solicitar", json={"correo": usuario.correo})
+        sin_cuenta = cliente.post(
+            "/api/auth/recuperar/solicitar", json={"correo": "nadie@ejemplo.cr"}
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_auth]
+
+    assert con_cuenta.status_code == 200
+    assert sin_cuenta.status_code == 200
+    assert con_cuenta.json() == sin_cuenta.json()
+
+
+def test_recuperacion_de_punta_a_punta_deja_la_cuenta_con_la_contrasena_nueva(
+    cliente: TestClient, usuario: Usuario, sesion
+) -> None:
+    enviados = _con_correo_falso(sesion)
+    try:
+        solicitud = cliente.post("/api/auth/recuperar/solicitar", json={"correo": usuario.correo})
+        assert solicitud.status_code == 200
+        token = enviados[0][2].split("token=")[1].split()[0]
+
+        respuesta = cliente.post(
+            "/api/auth/recuperar/confirmar",
+            json={"token": token, "contrasena_nueva": "otra-segura-123"},
+        )
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_auth]
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["token"]
+    assert cuerpo["usuario"]["id"] == usuario.id
+
+    login = cliente.post(
+        "/api/auth/iniciar-sesion",
+        json={"correo": usuario.correo, "contrasena": "otra-segura-123"},
+    )
+    assert login.status_code == 200
+
+
+def test_confirmar_recuperacion_con_un_token_invalido_se_traduce_a_422(
+    cliente: TestClient,
+) -> None:
+    respuesta = cliente.post(
+        "/api/auth/recuperar/confirmar",
+        json={"token": "esto-no-es-un-token-valido", "contrasena_nueva": "otra-segura-123"},
+    )
+
+    assert respuesta.status_code == 422
