@@ -231,6 +231,101 @@ def test_listar_compras_de_otro_titular_se_traduce_a_403(
     assert respuesta.status_code == 403
 
 
+def test_detalle_de_una_compra_trae_sus_renglones(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+
+    respuesta = cliente_con_correo_falso.get(
+        f"/api/compras/{compra.id}", params={"usuario_id": usuario.id}
+    )
+
+    cuerpo = respuesta.json()
+    assert len(cuerpo["lineas"]) == 1
+    assert Decimal(cuerpo["lineas"][0]["subtotal"]) == Decimal("7870.00")
+    assert cuerpo["lineas"][0]["categoria_id"] is None
+
+
+def test_desglosar_una_compra_en_dos_categorias(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+    alimentacion = cliente_con_correo_falso.post(
+        "/api/categorias",
+        json={"usuario_id": usuario.id, "nombre": "Alimentación", "color_hex": "#16A34A"},
+    ).json()
+    limpieza = cliente_con_correo_falso.post(
+        "/api/categorias",
+        json={"usuario_id": usuario.id, "nombre": "Limpieza", "color_hex": "#0EA5E9"},
+    ).json()
+
+    respuesta = cliente_con_correo_falso.post(
+        f"/api/compras/{compra.id}/desglosar",
+        params={"usuario_id": usuario.id},
+        json={
+            "lineas": [
+                {
+                    "descripcion": "Víveres",
+                    "cantidad": "1",
+                    "precio_unitario": "5000.00",
+                    "categoria_id": alimentacion["id"],
+                },
+                {
+                    "descripcion": "Artículos de limpieza",
+                    "cantidad": "1",
+                    "precio_unitario": "2870.00",
+                    "categoria_id": limpieza["id"],
+                },
+            ]
+        },
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert len(cuerpo["lineas"]) == 2
+    assert cuerpo["categoria_nombre"] == "Varias categorías"
+    assert {linea["descripcion"] for linea in cuerpo["lineas"]} == {
+        "Víveres",
+        "Artículos de limpieza",
+    }
+
+
+def test_desglosar_con_suma_que_no_calza_da_422(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+
+    respuesta = cliente_con_correo_falso.post(
+        f"/api/compras/{compra.id}/desglosar",
+        params={"usuario_id": usuario.id},
+        json={
+            "lineas": [{"descripcion": "Víveres", "cantidad": "1", "precio_unitario": "5000.00"}]
+        },
+    )
+
+    assert respuesta.status_code == 422
+
+
+def test_desglosar_sin_renglones_da_422_de_forma(
+    cliente_con_correo_falso: TestClient, usuario: Usuario, sesion: Session
+) -> None:
+    """El mínimo de un renglón lo exige el esquema (`Field(min_length=1)`), antes
+    de que el servicio llegue a correr -por eso 422 de forma, no de negocio."""
+    _vincular_y_sincronizar(cliente_con_correo_falso, usuario)
+    compra = sesion.scalars(select(Compra).where(Compra.usuario_id == usuario.id)).first()
+
+    respuesta = cliente_con_correo_falso.post(
+        f"/api/compras/{compra.id}/desglosar",
+        params={"usuario_id": usuario.id},
+        json={"lineas": []},
+    )
+
+    assert respuesta.status_code == 422
+
+
 def test_gasto_por_categoria_no_queda_enmascarado_por_el_detalle(
     cliente_con_correo_falso: TestClient, usuario: Usuario
 ) -> None:

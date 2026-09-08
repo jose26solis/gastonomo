@@ -14,6 +14,7 @@ from fastapi import APIRouter, Query
 
 from app.business.errors import RecursoNoEncontrado
 from app.business.services.compra_service import CompraDetallada
+from app.business.services.conciliacion_service import LineaDesgloseComando
 from app.presentation.dependencies import (
     ServicioDeBitacora,
     ServicioDeCompras,
@@ -22,8 +23,10 @@ from app.presentation.dependencies import (
 )
 from app.presentation.schemas import (
     CompraResponse,
+    DesglosarCompraRequest,
     EventoBitacoraResponse,
     GastoPorCategoriaResponse,
+    LineaCompraResponse,
     ResolverRevisionCompraRequest,
 )
 
@@ -51,6 +54,21 @@ def _respuesta(detalle: CompraDetallada) -> CompraResponse:
         origen=compra.origen,
         requiere_revision=compra.requiere_revision,
         creado_en=compra.creado_en,
+        lineas=[
+            LineaCompraResponse(
+                id=linea.id,
+                descripcion=linea.descripcion,
+                cantidad=linea.cantidad,
+                precio_unitario=linea.precio_unitario,
+                descuento=linea.descuento,
+                exento_impuesto=linea.exento_impuesto,
+                subtotal=linea.subtotal,
+                categoria_id=linea.categoria_id,
+                categoria_nombre=linea.categoria.nombre if linea.categoria else None,
+                categorizada_automaticamente=linea.categorizada_automaticamente,
+            )
+            for linea in compra.lineas
+        ],
     )
 
 
@@ -127,6 +145,37 @@ def resolver(
 ) -> CompraResponse:
     conciliacion.resolver_revision(
         usuario_id, compra_id, peticion.metodo_pago_id, peticion.categoria_id
+    )
+    return _respuesta(servicio.obtener_detalle_del_titular(usuario_id, compra_id))
+
+
+@router.post(
+    "/{compra_id}/desglosar",
+    response_model=CompraResponse,
+    summary="Partir una compra en varios renglones, cada uno con su propia categoría",
+)
+def desglosar(
+    compra_id: int,
+    peticion: DesglosarCompraRequest,
+    servicio: ServicioDeCompras,
+    conciliacion: ServicioDeConciliacion,
+    _: VerificarTitular,
+    usuario_id: int = Query(gt=0, le=2_147_483_647),
+) -> CompraResponse:
+    conciliacion.desglosar_compra(
+        usuario_id,
+        compra_id,
+        [
+            LineaDesgloseComando(
+                descripcion=linea.descripcion,
+                cantidad=linea.cantidad,
+                precio_unitario=linea.precio_unitario,
+                descuento=linea.descuento,
+                exento_impuesto=linea.exento_impuesto,
+                categoria_id=linea.categoria_id,
+            )
+            for linea in peticion.lineas
+        ],
     )
     return _respuesta(servicio.obtener_detalle_del_titular(usuario_id, compra_id))
 

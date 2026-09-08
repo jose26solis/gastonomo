@@ -68,6 +68,18 @@ class ResultadoConciliacion:
     presupuesto_alertado: bool
 
 
+@dataclass(frozen=True)
+class LineaDesgloseComando:
+    """Un renglón pedido para `ConciliacionService.desglosar_compra`."""
+
+    descripcion: str
+    cantidad: Decimal
+    precio_unitario: Decimal
+    descuento: Decimal
+    exento_impuesto: bool
+    categoria_id: int | None
+
+
 class ConciliacionService:
     """Aplica el Proceso 2 del dominio sobre un comprobante ya parseado."""
 
@@ -400,6 +412,141 @@ class ConciliacionService:
             actor=actor,
         )
         if presupuesto_id is not None:
+            self.bitacora.registrar_evento(
+                compra_id=compra.id,
+                usuario_id=usuario_id,
+                estado_actual=compra.estado.value,
+                tipo="IMPACTO_PRESUPUESTO",
+                datos={
+                    "presupuesto_id": presupuesto_id,
+                    "consumido_antes": str(consumido_antes),
+                    "consumido_despues": str(consumido_despues),
+                },
+                actor=actor,
+            )
+
+        return compra
+
+    def desglosar_compra(
+        self, usuario_id: int, compra_id: int, lineas: list[LineaDesgloseComando]
+    ) -> Compra:
+        """Reemplaza TODOS los renglones de una compra real por los que se manden
+        -"partir un cargo" en varios, cada uno con su propia categoría.
+
+        Una compra ingerida por correo nace con un único renglón por el monto
+        total -el comprobante nunca trae el detalle de qué se compró, ver
+        `LineaCompra`- esto es el refinamiento manual que ese renglón único
+        dejaba pendiente. La suma de los renglones nuevos tiene que calzar
+        exacto con `compra.subtotal`: desglosar reparte cuánto costó la
+        compra, nunca lo cambia.
+
+        Revierte el impacto que los renglones viejos ya hubieran dejado en
+        algún presupuesto (por su propia categoría y período) y aplica el de
+        los nuevos -mismo criterio de "solo si la moneda calza" que
+        `conciliar`. Si un renglón nuevo repite la categoría de uno viejo, el
+        resultado neto es cero: revertir y reaplicar da lo mismo que no
+        tocar nada, sin necesitar codificar esa coincidencia aparte.
+        """
+        if not lineas:
+            raise DatosInvalidos("Una compra necesita al menos un renglón.")
+
+        compra = self.compras.obtener_de_usuario(compra_id, usuario_id)
+        if compra is None:
+            raise RecursoNoEncontrado(f"La compra {compra_id} no existe en esta cuenta.")
+
+        suma = sum((datos.cantidad * datos.precio_unitario - datos.descuento) for datos in lineas)
+        suma = suma.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if suma != compra.subtotal:
+            raise DatosInvalidos(
+                f"Los renglones suman {suma}, pero la compra es de {compra.subtotal}."
+            )
+
+        # Valida cada categoría una sola vez, aunque se repita entre renglones.
+        categorias_validadas: set[int] = set()
+        for datos in lineas:
+            if datos.categoria_id is None or datos.categoria_id in categorias_validadas:
+                continue
+            categoria = self.categorias.obtener_de_usuario(datos.categoria_id, usuario_id)
+            if categoria is None:
+                raise RecursoNoEncontrado(
+                    f"La categoría {datos.categoria_id} no existe en esta cuenta."
+                )
+            if not categoria.es_hoja:
+                raise ReglaDeNegocioViolada("La categoría tiene que ser una hoja, no un grupo.")
+            categorias_validadas.add(datos.categoria_id)
+
+        actor = Actor(tipo="TITULAR", usuario_id=usuario_id)
+        lineas_anteriores = self.lineas.listar_de_compra(compra.id)
+        impactos_presupuesto: list[tuple[int, Decimal, Decimal]] = []
+
+        def _ajustar_presupuesto(categoria_id: int, delta: Decimal) -> None:
+            presupuesto = self.presupuestos.buscar(
+                usuario_id, categoria_id, compra.fecha.year, compra.fecha.month
+            )
+            if presupuesto is not None and presupuesto.moneda == compra.moneda:
+                antes = presupuesto.monto_consumido
+                presupuesto.monto_consumido = presupuesto.monto_consumido + delta
+                impactos_presupuesto.append((presupuesto.id, antes, presupuesto.monto_consumido))
+
+        for linea_vieja in lineas_anteriores:
+            if linea_vieja.categoria_id is not None:
+                _ajustar_presupuesto(linea_vieja.categoria_id, -linea_vieja.subtotal)
+
+        compra.lineas.clear()  # cascade="all, delete-orphan" se encarga de los viejos
+        self.compras.sesion.flush()
+
+        nuevas: list[LineaCompra] = []
+        for datos in lineas:
+            subtotal_linea = (datos.cantidad * datos.precio_unitario - datos.descuento).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            linea_nueva = LineaCompra(
+                compra_id=compra.id,
+                categoria_id=datos.categoria_id,
+                descripcion=datos.descripcion,
+                cantidad=datos.cantidad,
+                precio_unitario=datos.precio_unitario,
+                descuento=datos.descuento,
+                exento_impuesto=datos.exento_impuesto,
+                subtotal=subtotal_linea,
+                categorizada_automaticamente=False,
+            )
+            self.lineas.agregar(linea_nueva)
+            # Por la relación, no solo por la columna `compra_id` de arriba
+            # -mismo motivo que `compra.metodo_pago` en `resolver_revision`:
+            # la sesión no tiene `expire_on_commit`, así que si esta compra
+            # ya traía `lineas` cargado (lo trae: esta misma consulta lo
+            # cargó unas líneas arriba), la colección en memoria se queda
+            # vacía para siempre después de `compra.lineas.clear()` a menos
+            # que se le agreguen los renglones nuevos acá también -si no, un
+            # `SELECT` posterior sobre esta misma compra en esta sesión ni
+            # se molesta en volver a traer `lineas`, porque ya la ve "cargada".
+            compra.lineas.append(linea_nueva)
+            nuevas.append(linea_nueva)
+            if datos.categoria_id is not None:
+                _ajustar_presupuesto(datos.categoria_id, subtotal_linea)
+
+        requiere_revision_antes = compra.requiere_revision
+        compra.requiere_revision = compra.metodo_pago_id is None or any(
+            linea.categoria_id is None for linea in nuevas
+        )
+
+        self.comprobantes.sesion.commit()
+
+        self.bitacora.registrar_evento(
+            compra_id=compra.id,
+            usuario_id=usuario_id,
+            estado_actual=compra.estado.value,
+            tipo="DESGLOSE_MANUAL",
+            datos={
+                "renglones_anteriores": len(lineas_anteriores),
+                "renglones_nuevos": len(nuevas),
+                "requiere_revision_antes": requiere_revision_antes,
+                "requiere_revision_despues": compra.requiere_revision,
+            },
+            actor=actor,
+        )
+        for presupuesto_id, consumido_antes, consumido_despues in impactos_presupuesto:
             self.bitacora.registrar_evento(
                 compra_id=compra.id,
                 usuario_id=usuario_id,

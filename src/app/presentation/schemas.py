@@ -499,9 +499,31 @@ class ResolverRevisionCompraRequest(BaseModel):
     categoria_id: int | None = Field(default=None, gt=0, le=_ID_MAXIMO)
 
 
+class LineaCompraResponse(BaseModel):
+    """Un renglón de una compra, con el nombre de su categoría ya resuelto."""
+
+    id: int
+    descripcion: str
+    cantidad: Decimal
+    precio_unitario: Decimal
+    descuento: Decimal
+    exento_impuesto: bool
+    subtotal: Decimal
+    categoria_id: int | None
+    categoria_nombre: str | None
+    categorizada_automaticamente: bool
+
+
 class CompraResponse(BaseModel):
     """Una compra real, con el nombre de su comercio/método/categoría ya resueltos
-    -para no obligar al frontend a pedirlos aparte por cada fila de una lista."""
+    -para no obligar al frontend a pedirlos aparte por cada fila de una lista.
+
+    `categoria_id`/`categoria_nombre` son la simplificación de "la categoría
+    de la compra": la de su único renglón si solo tiene uno (el caso de
+    siempre, ingerida por correo), la que comparten todos si el desglose
+    manual los dejó a todos en la misma, o `None`/"Varias categorías" si de
+    verdad quedaron repartidos -ver `CompraService._detallar`. `lineas` es el
+    detalle real, renglón por renglón, para la pantalla de desglose."""
 
     id: int
     usuario_id: int
@@ -521,6 +543,27 @@ class CompraResponse(BaseModel):
     origen: OrigenCompra
     requiere_revision: bool
     creado_en: datetime
+    lineas: list[LineaCompraResponse]
+
+
+class LineaDesgloseRequest(BaseModel):
+    """Un renglón dentro del cuerpo de POST /api/compras/{id}/desglosar."""
+
+    descripcion: str = Field(min_length=1, max_length=255)
+    cantidad: Decimal = Field(gt=0, lt=Decimal(10**9))
+    precio_unitario: Decimal = Field(ge=0, lt=Decimal(10**12))
+    descuento: Decimal = Field(default=Decimal("0"), ge=0, lt=Decimal(10**12))
+    exento_impuesto: bool = False
+    categoria_id: int | None = Field(default=None, gt=0, le=_ID_MAXIMO)
+
+
+class DesglosarCompraRequest(BaseModel):
+    """Cuerpo de POST /api/compras/{id}/desglosar -reemplaza TODOS los renglones
+    de la compra por estos. La suma de sus subtotales tiene que calzar exacto
+    con el subtotal de la compra -eso lo valida el servicio, no acá: es una
+    regla de negocio, no una restricción de forma."""
+
+    lineas: list[LineaDesgloseRequest] = Field(min_length=1)
 
 
 class GastoPorCategoriaResponse(BaseModel):

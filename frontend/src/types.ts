@@ -172,6 +172,21 @@ export interface ReglaCategorizacion {
 export type EstadoCompra = "BORRADOR" | "REGISTRADA" | "CONCILIADA" | "ANULADA";
 export type OrigenCompra = "INGESTA_CORREO" | "MANUAL" | "IMPORTACION";
 
+/** Un renglón de una compra -ver `desglosarCompra` en api.ts. */
+export interface LineaCompra {
+  id: number;
+  descripcion: string;
+  /** Viajan como string desde Pydantic (Decimal). */
+  cantidad: string;
+  precio_unitario: string;
+  descuento: string;
+  exento_impuesto: boolean;
+  subtotal: string;
+  categoria_id: number | null;
+  categoria_nombre: string | null;
+  categorizada_automaticamente: boolean;
+}
+
 /**
  * Una compra real ya conciliada -el resultado del Proceso 2 del dominio, no
  * el comprobante crudo. Antes de esto solo se podía ver indirectamente, a
@@ -184,6 +199,9 @@ export interface Compra {
   comercio_nombre: string;
   metodo_pago_id: number | null;
   metodo_pago_alias: string | null;
+  /** "La" categoría de la compra: la de su único renglón, la que comparten
+   * todos si el desglose los dejó iguales, o `null`/"Varias categorías" si
+   * de verdad quedaron repartidos -ver `lineas` para el detalle real. */
   categoria_id: number | null;
   categoria_nombre: string | null;
   fecha: string;
@@ -198,6 +216,7 @@ export interface Compra {
   /** Quedó sin método de pago o sin categoría al conciliar -ver `Compras.tsx`. */
   requiere_revision: boolean;
   creado_en: string;
+  lineas: LineaCompra[];
 }
 
 /**

@@ -443,6 +443,7 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `GET` | `/api/compras?usuario_id=1` | Lista las compras reales del titular, más recientes primero. Con `&requiere_revision=true` trae solo las que quedaron sin método de pago o sin categoría al conciliar |
 | `GET` | `/api/compras/{id}?usuario_id=1` | Detalle de una compra real, con el nombre de su comercio/método/categoría ya resueltos |
 | `POST` | `/api/compras/{id}/resolver?usuario_id=1` | Corrige a mano el método de pago y/o la categoría de una compra -pensado para resolver una que quedó `requiere_revision` |
+| `POST` | `/api/compras/{id}/desglosar?usuario_id=1` | Reemplaza TODOS los renglones de una compra -"partir un cargo" en varios, cada uno con su propia categoría. La suma tiene que calzar exacto con el total |
 | `GET` | `/api/compras/{id}/bitacora?usuario_id=1` | La trazabilidad completa de una `Compra` real: de qué correo nació, cómo se emparejó el método de pago, qué regla la categorizó, si impactó un presupuesto -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb) más abajo |
 | `POST` | `/api/reglas-categorizacion` | Crea una regla de categorización (patrón sobre el nombre del comercio → categoría, con prioridad) |
 | `GET` | `/api/reglas-categorizacion?usuario_id=1` | Lista las reglas de categorización del titular, en orden de prioridad |
@@ -948,9 +949,14 @@ Pendiente:
       mandarse por correo -ver [`correo_saliente.py`](src/app/business/services/correo_saliente.py)-
       así que el flujo se puede probar entero en local sin montar un servidor de correo.
 - [x] Pruebas automatizadas de frontend -ver [Correr las pruebas y el linter](#5-correr-las-pruebas-y-el-linter)
-- [ ] Desglose manual de una compra en varias líneas -`LineaCompra` ya soporta varias por `Compra`
-      en el modelo, pero todavía no hay pantalla para partir un cargo; toda compra ingerida por
-      correo nace con una sola línea
+- [x] Desglose manual de una compra en varias líneas -botón "Desglosar" en Compras: reemplaza TODOS
+      los renglones de una compra por los que se editen, cada uno con su propia categoría; la suma
+      tiene que calzar exacto con el total (se valida en el frontend mientras se edita, y de verdad
+      en `ConciliacionService.desglosar_compra`). Revierte el impacto que los renglones viejos ya
+      hubieran dejado en algún presupuesto y aplica el de los nuevos -ver [Conciliación real y
+      bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb). `categoria_id`/`categoria_nombre`
+      de una compra pasan a ser "Varias categorías" cuando el desglose de verdad reparte entre más
+      de una -ver `CompraService._detallar`.
 - [ ] Verificar en vivo la integración con el BCCR con una suscripción real. El contrato HTTP ya
       está confirmado contra la documentación del propio servicio (nombres de parámetro y formato
       de respuesta, ver la nota de conversión de moneda más arriba), pero falta la prueba de punta

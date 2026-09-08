@@ -1,4 +1,4 @@
-import { Clock, ReceiptX, WarningCircle } from "@phosphor-icons/react";
+import { Clock, ListDashes, ReceiptX, WarningCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { api, ErrorDeApiError } from "../api";
 import { PanelBitacora } from "../components/PanelBitacora";
@@ -85,6 +85,25 @@ export function Compras({ usuarioId }: { usuarioId: number }) {
     }
   }
 
+  async function desglosar(
+    compra: Compra,
+    lineas: Array<{
+      descripcion: string;
+      cantidad: string;
+      precioUnitario: string;
+      categoriaId?: number;
+    }>,
+  ) {
+    const actualizada = await api.desglosarCompra(usuarioId, compra.id, lineas);
+    setCompras((actual) => {
+      if (!actual) return actual;
+      if (filtro === "pendientes" && !actualizada.requiere_revision) {
+        return actual.filter((c) => c.id !== compra.id);
+      }
+      return actual.map((c) => (c.id === compra.id ? actualizada : c));
+    });
+  }
+
   const hojas = categorias.filter((c) => c.es_hoja && c.activa);
 
   return (
@@ -118,6 +137,7 @@ export function Compras({ usuarioId }: { usuarioId: number }) {
             metodosPago={metodosPago}
             categorias={hojas}
             onResolver={resolver}
+            onDesglosar={desglosar}
             onVerBitacora={() =>
               setBitacoraAbierta({
                 compraId: compra.id,
@@ -145,18 +165,32 @@ function FilaCompra({
   metodosPago,
   categorias,
   onResolver,
+  onDesglosar,
   onVerBitacora,
 }: {
   compra: Compra;
   metodosPago: MetodoPago[];
   categorias: Categoria[];
   onResolver: (compra: Compra, metodoPagoId?: number, categoriaId?: number) => void;
+  onDesglosar: (
+    compra: Compra,
+    lineas: Array<{
+      descripcion: string;
+      cantidad: string;
+      precioUnitario: string;
+      categoriaId?: number;
+    }>,
+  ) => Promise<void>;
   onVerBitacora: () => void;
 }) {
   const [metodoElegido, setMetodoElegido] = useState("");
   const [categoriaElegida, setCategoriaElegida] = useState("");
+  const [desglosando, setDesglosando] = useState(false);
   const faltaMetodo = compra.metodo_pago_id === null;
-  const faltaCategoria = compra.categoria_id === null;
+  // Con más de un renglón, "elegir una categoría" ya no tiene un único
+  // destino claro -eso es trabajo de "Desglosar" (corrige renglón por
+  // renglón), no de este corrector rápido pensado para un único renglón.
+  const faltaCategoria = compra.categoria_id === null && compra.lineas.length <= 1;
 
   return (
     <div className="card stack" style={{ gap: 11 }}>
@@ -188,6 +222,15 @@ function FilaCompra({
         <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
           {formatearMonto(-Number(compra.total), compra.moneda)}
         </span>
+        <button
+          className="btn btn-sm"
+          onClick={() => setDesglosando((actual) => !actual)}
+          title="Partir esta compra en varios renglones, cada uno con su propia categoría"
+          aria-label={`Desglosar ${compra.comercio_nombre}`}
+          style={{ padding: 5 }}
+        >
+          <ListDashes size={12} />
+        </button>
         <button
           className="btn btn-sm"
           onClick={onVerBitacora}
@@ -255,6 +298,195 @@ function FilaCompra({
           </button>
         </div>
       )}
+
+      {desglosando && (
+        <PanelDesglose
+          compra={compra}
+          categorias={categorias}
+          onGuardar={async (lineas) => {
+            await onDesglosar(compra, lineas);
+            setDesglosando(false);
+          }}
+          onCancelar={() => setDesglosando(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface FilaDesglose {
+  descripcion: string;
+  monto: string;
+  categoriaId: string;
+}
+
+function lineasIniciales(compra: Compra): FilaDesglose[] {
+  // Con un único renglón (el caso de siempre, recién ingerido por correo),
+  // arranca con ese renglón más uno vacío -invita a partirlo en vez de
+  // mostrar un formulario en blanco. Con varios (ya desglosada antes), edita
+  // los que ya hay.
+  if (compra.lineas.length <= 1) {
+    const unica = compra.lineas[0];
+    return [
+      {
+        descripcion: unica?.descripcion ?? compra.comercio_nombre,
+        monto: unica?.subtotal ?? compra.total,
+        categoriaId: unica?.categoria_id ? String(unica.categoria_id) : "",
+      },
+      { descripcion: "", monto: "", categoriaId: "" },
+    ];
+  }
+  return compra.lineas.map((linea) => ({
+    descripcion: linea.descripcion,
+    monto: linea.subtotal,
+    categoriaId: linea.categoria_id ? String(linea.categoria_id) : "",
+  }));
+}
+
+/**
+ * "Partir un cargo" en varios renglones, cada uno con su propia categoría.
+ *
+ * La suma de los renglones tiene que calzar exacto con el total de la
+ * compra -desglosar reparte cuánto costó, nunca lo cambia (ver
+ * `ConciliacionService.desglosar_compra` en el backend, que es quien de
+ * verdad valida esto). Acá solo se avisa mientras se edita, para que no
+ * haga falta mandar la petición para descubrir que no calza.
+ */
+function PanelDesglose({
+  compra,
+  categorias,
+  onGuardar,
+  onCancelar,
+}: {
+  compra: Compra;
+  categorias: Categoria[];
+  onGuardar: (
+    lineas: Array<{
+      descripcion: string;
+      cantidad: string;
+      precioUnitario: string;
+      categoriaId?: number;
+    }>,
+  ) => Promise<void>;
+  onCancelar: () => void;
+}) {
+  const [filas, setFilas] = useState<FilaDesglose[]>(() => lineasIniciales(compra));
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const filasCompletas = filas.filter((f) => f.descripcion.trim() !== "" && f.monto !== "");
+  const suma = filasCompletas.reduce((acumulado, f) => acumulado + (Number(f.monto) || 0), 0);
+  const total = Number(compra.total);
+  // Comparación con tolerancia de un centavo: sumar strings decimales en
+  // punto flotante puede arrastrar un error minúsculo que un usuario real
+  // nunca metería a mano -el backend igual valida exacto con Decimal.
+  const sumaCalza = filasCompletas.length > 0 && Math.abs(suma - total) < 0.005;
+
+  function actualizarFila(indice: number, cambios: Partial<FilaDesglose>) {
+    setFilas((actual) => actual.map((f, i) => (i === indice ? { ...f, ...cambios } : f)));
+  }
+
+  async function guardar() {
+    setError(null);
+    setGuardando(true);
+    try {
+      await onGuardar(
+        filasCompletas.map((f) => ({
+          descripcion: f.descripcion.trim(),
+          cantidad: "1",
+          precioUnitario: f.monto,
+          categoriaId: f.categoriaId ? Number(f.categoriaId) : undefined,
+        })),
+      );
+    } catch (e) {
+      setError(e instanceof ErrorDeApiError ? e.message : "Ocurrió un error inesperado.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div
+      className="stack"
+      style={{ gap: 8, borderTop: "1px solid var(--color-surface-2)", paddingTop: 11 }}
+    >
+      {filas.map((fila, indice) => (
+        <div
+          key={indice}
+          style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+        >
+          <input
+            value={fila.descripcion}
+            onChange={(e) => actualizarFila(indice, { descripcion: e.target.value })}
+            placeholder="Descripción"
+            style={{ ...ESTILO_SELECT, flex: 2, minWidth: 120 }}
+          />
+          <input
+            value={fila.monto}
+            onChange={(e) => actualizarFila(indice, { monto: e.target.value })}
+            placeholder="Monto"
+            inputMode="decimal"
+            style={{ ...ESTILO_SELECT, flex: 1, minWidth: 90 }}
+          />
+          <select
+            value={fila.categoriaId}
+            onChange={(e) => actualizarFila(indice, { categoriaId: e.target.value })}
+            style={ESTILO_SELECT}
+          >
+            <option value="">Sin categoría</option>
+            {categorias.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn btn-sm"
+            onClick={() => setFilas((actual) => actual.filter((_, i) => i !== indice))}
+            disabled={filas.length <= 1}
+            aria-label="Quitar este renglón"
+            style={{ padding: 5 }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <button
+          className="btn btn-sm"
+          type="button"
+          onClick={() =>
+            setFilas((actual) => [...actual, { descripcion: "", monto: "", categoriaId: "" }])
+          }
+        >
+          + Agregar renglón
+        </button>
+        <span
+          style={{
+            fontSize: 11,
+            color: sumaCalza ? "var(--color-text-dim)" : "#e8a33d",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          Suma: {formatearMonto(suma, compra.moneda)} / {formatearMonto(total, compra.moneda)}
+        </span>
+      </div>
+
+      {error && <p className="mensaje-error">{error}</p>}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          className="btn btn-sm btn-primary"
+          disabled={!sumaCalza || guardando}
+          onClick={guardar}
+        >
+          {guardando ? "Guardando…" : "Guardar desglose"}
+        </button>
+        <button className="btn btn-sm" type="button" onClick={onCancelar} disabled={guardando}>
+          Cancelar
+        </button>
+      </div>
     </div>
   );
 }

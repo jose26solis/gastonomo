@@ -12,7 +12,7 @@ from app.business.parsers.comprobante_bac import ComprobanteParseado
 from app.business.services.bitacora_service import BitacoraComprasService
 from app.business.services.categoria_service import CategoriaService, CrearCategoriaComando
 from app.business.services.comercio_service import ComercioService
-from app.business.services.conciliacion_service import ConciliacionService
+from app.business.services.conciliacion_service import ConciliacionService, LineaDesgloseComando
 from app.business.services.metodo_pago_service import CrearMetodoPagoComando, MetodoPagoService
 from app.business.services.presupuesto_service import PresupuestoService
 from app.business.services.tipo_cambio_service import TipoDeCambio
@@ -643,6 +643,273 @@ def test_resolver_revision_rechaza_metodo_de_pago_desactivado(
 
     with pytest.raises(ReglaDeNegocioViolada):
         servicio.resolver_revision(usuario.id, resultado.compra_id, metodo.id, None)
+
+
+def _linea(
+    descripcion: str,
+    precio_unitario: Decimal,
+    categoria_id: int | None = None,
+    cantidad: Decimal = Decimal("1"),
+    descuento: Decimal = Decimal("0"),
+) -> LineaDesgloseComando:
+    return LineaDesgloseComando(
+        descripcion=descripcion,
+        cantidad=cantidad,
+        precio_unitario=precio_unitario,
+        descuento=descuento,
+        exento_impuesto=False,
+        categoria_id=categoria_id,
+    )
+
+
+# ---- desglosar_compra: partir un cargo en varios renglones ----
+
+
+def test_desglosar_reemplaza_los_renglones_viejos_por_los_nuevos(
+    servicio: ConciliacionService, usuario: Usuario, cuenta_correo: CuentaCorreo, sesion: Session
+) -> None:
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    desglosada = servicio.desglosar_compra(
+        usuario.id,
+        resultado.compra_id,
+        [
+            _linea("Víveres", Decimal("5000.00")),
+            _linea("Artículos de limpieza", Decimal("2870.00")),
+        ],
+    )
+
+    lineas = servicio.lineas.listar_de_compra(desglosada.id)
+    assert len(lineas) == 2
+    assert {linea.descripcion for linea in lineas} == {"Víveres", "Artículos de limpieza"}
+    assert sum(linea.subtotal for linea in lineas) == Decimal("7870.00")
+
+
+def test_desglosar_reparte_entre_dos_categorias_y_acumula_cada_presupuesto(
+    servicio: ConciliacionService,
+    presupuestos: PresupuestoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    alimentacion = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    limpieza = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Limpieza", color_hex="#0EA5E9")
+    )
+    presupuesto_alimentacion = presupuestos.crear_o_actualizar(
+        usuario.id, alimentacion.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    presupuesto_limpieza = presupuestos.crear_o_actualizar(
+        usuario.id, limpieza.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())  # sin categoría todavía
+
+    servicio.desglosar_compra(
+        usuario.id,
+        resultado.compra_id,
+        [
+            _linea("Víveres", Decimal("5000.00"), categoria_id=alimentacion.id),
+            _linea("Artículos de limpieza", Decimal("2870.00"), categoria_id=limpieza.id),
+        ],
+    )
+
+    actualizado_alimentacion = presupuestos.presupuestos.obtener_de_usuario(
+        presupuesto_alimentacion.id, usuario.id
+    )
+    actualizado_limpieza = presupuestos.presupuestos.obtener_de_usuario(
+        presupuesto_limpieza.id, usuario.id
+    )
+    assert actualizado_alimentacion.monto_consumido == Decimal("5000.00")
+    assert actualizado_limpieza.monto_consumido == Decimal("2870.00")
+
+
+def test_desglosar_revierte_el_presupuesto_de_la_categoria_anterior(
+    servicio: ConciliacionService,
+    presupuestos: PresupuestoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    """La compra ya había impactado un presupuesto antes de desglosarse -ese
+    impacto tiene que revertirse, no quedar duplicado."""
+    categoria_original = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    categoria_nueva = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Limpieza", color_hex="#0EA5E9")
+    )
+    presupuesto_original = presupuestos.crear_o_actualizar(
+        usuario.id, categoria_original.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    presupuesto_nuevo = presupuestos.crear_o_actualizar(
+        usuario.id, categoria_nueva.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    comercio = servicio.comercios_servicio.resolver_o_crear("WALMART SAN SEBASTIAN")
+    servicio.comercios_servicio.asignar_categoria(usuario.id, comercio.id, categoria_original.id)
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+    assert presupuestos.presupuestos.obtener_de_usuario(
+        presupuesto_original.id, usuario.id
+    ).monto_consumido == Decimal("7870.00")
+
+    servicio.desglosar_compra(
+        usuario.id,
+        resultado.compra_id,
+        [_linea("Artículos de limpieza", Decimal("7870.00"), categoria_id=categoria_nueva.id)],
+    )
+
+    original_despues = presupuestos.presupuestos.obtener_de_usuario(
+        presupuesto_original.id, usuario.id
+    )
+    nuevo_despues = presupuestos.presupuestos.obtener_de_usuario(presupuesto_nuevo.id, usuario.id)
+    assert original_despues.monto_consumido == Decimal("0.00")
+    assert nuevo_despues.monto_consumido == Decimal("7870.00")
+
+
+def test_desglosar_con_la_misma_categoria_de_antes_no_cambia_el_presupuesto_neto(
+    servicio: ConciliacionService,
+    presupuestos: PresupuestoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    """Revertir y reaplicar la misma categoría es un no-op neto -ver el docstring
+    de `desglosar_compra`."""
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    presupuesto = presupuestos.crear_o_actualizar(
+        usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+    comercio = servicio.comercios_servicio.resolver_o_crear("WALMART SAN SEBASTIAN")
+    servicio.comercios_servicio.asignar_categoria(usuario.id, comercio.id, categoria.id)
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    servicio.desglosar_compra(
+        usuario.id,
+        resultado.compra_id,
+        [
+            _linea("Víveres", Decimal("5000.00"), categoria_id=categoria.id),
+            _linea("Más víveres", Decimal("2870.00"), categoria_id=categoria.id),
+        ],
+    )
+
+    actualizado = presupuestos.presupuestos.obtener_de_usuario(presupuesto.id, usuario.id)
+    assert actualizado.monto_consumido == Decimal("7870.00")
+
+
+def test_desglosar_sin_renglones_falla(
+    servicio: ConciliacionService, usuario: Usuario, cuenta_correo: CuentaCorreo, sesion: Session
+) -> None:
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(DatosInvalidos):
+        servicio.desglosar_compra(usuario.id, resultado.compra_id, [])
+
+
+def test_desglosar_una_compra_que_no_existe_falla(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    with pytest.raises(RecursoNoEncontrado):
+        servicio.desglosar_compra(usuario.id, 999999, [_linea("Algo", Decimal("100"))])
+
+
+def test_desglosar_rechaza_una_suma_que_no_calza_con_el_total(
+    servicio: ConciliacionService, usuario: Usuario, cuenta_correo: CuentaCorreo, sesion: Session
+) -> None:
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(DatosInvalidos):
+        servicio.desglosar_compra(
+            usuario.id, resultado.compra_id, [_linea("Víveres", Decimal("5000.00"))]
+        )
+
+
+def test_desglosar_rechaza_categoria_que_no_existe(
+    servicio: ConciliacionService, usuario: Usuario, cuenta_correo: CuentaCorreo, sesion: Session
+) -> None:
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(RecursoNoEncontrado):
+        servicio.desglosar_compra(
+            usuario.id,
+            resultado.compra_id,
+            [_linea("Víveres", Decimal("7870.00"), categoria_id=999999)],
+        )
+
+
+def test_desglosar_rechaza_categoria_que_no_es_hoja(
+    servicio: ConciliacionService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    grupo = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    categorias.crear(
+        CrearCategoriaComando(
+            usuario_id=usuario.id,
+            nombre="Supermercado",
+            color_hex="#22C55E",
+            categoria_padre_id=grupo.id,
+        )
+    )
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio.desglosar_compra(
+            usuario.id,
+            resultado.compra_id,
+            [_linea("Víveres", Decimal("7870.00"), categoria_id=grupo.id)],
+        )
+
+
+def test_desglosar_con_un_renglon_sin_categoria_deja_pendiente_de_revision(
+    servicio: ConciliacionService,
+    metodos_pago: MetodoPagoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+    cuenta_correo: CuentaCorreo,
+    sesion: Session,
+) -> None:
+    metodos_pago.crear(
+        CrearMetodoPagoComando(
+            usuario_id=usuario.id, alias="Amex", tipo=TipoMetodoPago.CREDITO, ultimos_cuatro="4321"
+        )
+    )
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    comercio = servicio.comercios_servicio.resolver_o_crear("WALMART SAN SEBASTIAN")
+    servicio.comercios_servicio.asignar_categoria(usuario.id, comercio.id, categoria.id)
+    comprobante = _comprobante(sesion, cuenta_correo)
+    resultado = servicio.conciliar(usuario.id, comprobante, _parseado())
+    assert resultado.requiere_revision is False, "ya tenía método de pago y categoría"
+
+    desglosada = servicio.desglosar_compra(
+        usuario.id,
+        resultado.compra_id,
+        [
+            _linea("Víveres", Decimal("5000.00"), categoria_id=categoria.id),
+            _linea("Sin clasificar todavía", Decimal("2870.00")),
+        ],
+    )
+
+    assert desglosada.requiere_revision is True
 
 
 def test_resolver_revision_rechaza_categoria_que_no_es_hoja(

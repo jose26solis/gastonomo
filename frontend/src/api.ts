@@ -519,6 +519,38 @@ export const api = {
     });
   },
 
+  /** Reemplaza TODOS los renglones de una compra por los que se manden -"partir
+   * un cargo" en varios, cada uno con su propia categoría. La suma de sus
+   * subtotales tiene que calzar exacto con el subtotal de la compra; si no,
+   * el backend responde 422 (`DatosInvalidos`). */
+  desglosarCompra(
+    usuarioId: number,
+    compraId: number,
+    lineas: Array<{
+      descripcion: string;
+      cantidad: string;
+      precioUnitario: string;
+      descuento?: string;
+      exentoImpuesto?: boolean;
+      categoriaId?: number;
+    }>,
+  ): Promise<Compra> {
+    return peticion(`/api/compras/${compraId}/desglosar?usuario_id=${usuarioId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lineas: lineas.map((linea) => ({
+          descripcion: linea.descripcion,
+          cantidad: linea.cantidad,
+          precio_unitario: linea.precioUnitario,
+          descuento: linea.descuento ?? "0",
+          exento_impuesto: linea.exentoImpuesto ?? false,
+          categoria_id: linea.categoriaId ?? null,
+        })),
+      }),
+    });
+  },
+
   // ---- Bitácora de compras ----
 
   /** La trazabilidad completa de una compra: de qué correo nació y cómo se

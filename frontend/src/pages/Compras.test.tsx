@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { Categoria, Compra, MetodoPago } from "../types";
+import type { Categoria, Compra, LineaCompra, MetodoPago } from "../types";
 import { Compras } from "./Compras";
 
 vi.mock("../api", async () => {
@@ -14,11 +14,28 @@ vi.mock("../api", async () => {
       listarMetodosPago: vi.fn(),
       listarCategorias: vi.fn(),
       resolverRevisionCompra: vi.fn(),
+      desglosarCompra: vi.fn(),
       // PanelBitacora vive dentro de esta pantalla y también llama a `api`.
       bitacoraDeCompra: vi.fn(),
     },
   };
 });
+
+function lineaCompra(overrides: Partial<LineaCompra> = {}): LineaCompra {
+  return {
+    id: 1,
+    descripcion: "WALMART SAN SEBASTIAN",
+    cantidad: "1",
+    precio_unitario: "7870.00",
+    descuento: "0",
+    exento_impuesto: false,
+    subtotal: "7870.00",
+    categoria_id: null,
+    categoria_nombre: null,
+    categorizada_automaticamente: false,
+    ...overrides,
+  };
+}
 
 function compra(overrides: Partial<Compra> = {}): Compra {
   return {
@@ -40,6 +57,7 @@ function compra(overrides: Partial<Compra> = {}): Compra {
     origen: "INGESTA_CORREO",
     requiere_revision: true,
     creado_en: "2026-08-30T13:27:00Z",
+    lineas: [lineaCompra()],
     ...overrides,
   };
 }
@@ -167,5 +185,83 @@ describe("<Compras />", () => {
     await usuario.click(screen.getByRole("button", { name: /Ver bitácora de/ }));
 
     expect(await screen.findByText("Trazabilidad completa")).toBeInTheDocument();
+  });
+
+  it("abre el panel de desglose y precarga el renglón existente más uno vacío", async () => {
+    const usuario = userEvent.setup();
+    vi.mocked(api.listarCompras).mockResolvedValue([compra()]);
+    render(<Compras usuarioId={1} />);
+    await screen.findByText("WALMART SAN SEBASTIAN");
+
+    await usuario.click(screen.getByRole("button", { name: "Desglosar WALMART SAN SEBASTIAN" }));
+
+    const descripciones = screen.getAllByPlaceholderText("Descripción");
+    expect(descripciones).toHaveLength(2);
+    expect(descripciones[0]).toHaveValue("WALMART SAN SEBASTIAN");
+    expect(screen.getAllByPlaceholderText("Monto")[0]).toHaveValue("7870.00");
+  });
+
+  it("una suma que no calza con el total deja 'Guardar desglose' deshabilitado", async () => {
+    const usuario = userEvent.setup();
+    vi.mocked(api.listarCompras).mockResolvedValue([compra()]);
+    render(<Compras usuarioId={1} />);
+    await screen.findByText("WALMART SAN SEBASTIAN");
+    await usuario.click(screen.getByRole("button", { name: "Desglosar WALMART SAN SEBASTIAN" }));
+
+    const monto = screen.getAllByPlaceholderText("Monto")[0];
+    await usuario.clear(monto);
+    await usuario.type(monto, "1000.00");
+
+    expect(screen.getByText(/Suma:/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar desglose" })).toBeDisabled();
+  });
+
+  it("desglosar reparte el monto entre dos renglones y llama a la API", async () => {
+    const usuario = userEvent.setup();
+    vi.mocked(api.listarCompras).mockResolvedValue([compra()]);
+    vi.mocked(api.desglosarCompra).mockResolvedValue(
+      compra({
+        requiere_revision: true, // el segundo renglón queda sin categoría
+        categoria_id: null,
+        categoria_nombre: "Varias categorías",
+        lineas: [
+          lineaCompra({
+            id: 10,
+            descripcion: "Víveres",
+            subtotal: "5000.00",
+            categoria_id: 1,
+            categoria_nombre: "Supermercado",
+          }),
+          lineaCompra({ id: 11, descripcion: "Limpieza", subtotal: "2870.00" }),
+        ],
+      }),
+    );
+    render(<Compras usuarioId={1} />);
+    await screen.findByText("WALMART SAN SEBASTIAN");
+    await usuario.click(screen.getByRole("button", { name: "Desglosar WALMART SAN SEBASTIAN" }));
+
+    const montos = screen.getAllByPlaceholderText("Monto");
+    await usuario.clear(montos[0]);
+    await usuario.type(montos[0], "5000.00");
+    await usuario.type(screen.getAllByPlaceholderText("Descripción")[1], "Limpieza");
+    await usuario.type(montos[1], "2870.00");
+    expect(screen.getByRole("button", { name: "Guardar desglose" })).toBeEnabled();
+
+    await usuario.click(screen.getByRole("button", { name: "Guardar desglose" }));
+
+    await waitFor(() =>
+      expect(api.desglosarCompra).toHaveBeenCalledWith(1, 1, [
+        {
+          descripcion: "WALMART SAN SEBASTIAN",
+          cantidad: "1",
+          precioUnitario: "5000.00",
+          categoriaId: undefined,
+        },
+        { descripcion: "Limpieza", cantidad: "1", precioUnitario: "2870.00", categoriaId: undefined },
+      ]),
+    );
+    // El texto vive en un `div` con varios fragmentos ("29 ago · ... ·
+    // Varias categorías") -por eso una expresión regular, no el texto exacto.
+    expect(await screen.findByText(/Varias categorías/)).toBeInTheDocument();
   });
 });
