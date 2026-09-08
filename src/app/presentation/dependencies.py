@@ -100,7 +100,14 @@ def obtener_servicio_de_cuentas_correo(
         ComprobanteRepository(sesion),
         TransferenciaSinpeRepository(sesion),
         obtener_servicio_de_tipo_cambio(cliente),
-        obtener_servicio_de_conciliacion(sesion, cliente),
+        # Llamada directa, no `Depends` -`ServicioDeBitacora` se define más
+        # abajo en este archivo y no se puede nombrar todavía acá arriba.
+        # Sin consecuencia real: nada prueba este camino con un doble de
+        # bitácora (las pruebas de `cuentas_correo` reemplazan este servicio
+        # entero, ver conftest.py), a diferencia de `obtener_servicio_de_conciliacion`
+        # -ver la nota ahí- que sí lo necesita resuelto por FastAPI para que
+        # un override de prueba lo alcance.
+        obtener_servicio_de_conciliacion(sesion, cliente, obtener_servicio_de_bitacora()),
     )
 
 
@@ -183,12 +190,25 @@ ServicioDeBitacora = Annotated[BitacoraComprasService, Depends(obtener_servicio_
 
 
 def obtener_servicio_de_conciliacion(
-    sesion: SesionDependencia, cliente: ClienteHttpDependencia
+    sesion: SesionDependencia,
+    cliente: ClienteHttpDependencia,
+    bitacora: ServicioDeBitacora,
 ) -> ConciliacionService:
     """Arma el servicio de conciliación con todos los repositorios que el
     Proceso 2 necesita tocar en su transacción, más el servicio de comercios
     (catálogo compartido) y el de tipo de cambio (opcional, igual que en
-    `CuentaCorreoService`)."""
+    `CuentaCorreoService`).
+
+    `bitacora` viaja como dependencia de FastAPI (`ServicioDeBitacora`), no
+    como una llamada directa a `obtener_servicio_de_bitacora()` -a
+    diferencia de esa otra llamada directa en `obtener_servicio_de_cuentas_correo`
+    de arriba, esta función sí se resuelve como `Depends` de verdad en
+    endpoints que crean o corrigen una `Compra` a mano (`compras.py`:
+    `/resolver`, `/desglosar`, `/manual`), y ahí un
+    `app.dependency_overrides[obtener_servicio_de_bitacora]` -el que usan las
+    pruebas para no depender de un Mongo real- necesita que FastAPI la
+    resuelva para poder interceptarla.
+    """
     return ConciliacionService(
         CompraRepository(sesion),
         LineaCompraRepository(sesion),
@@ -201,7 +221,7 @@ def obtener_servicio_de_conciliacion(
         ComprobanteRepository(sesion),
         obtener_servicio_de_comercios(sesion),
         obtener_servicio_de_tipo_cambio(cliente),
-        obtener_servicio_de_bitacora(),
+        bitacora,
     )
 
 

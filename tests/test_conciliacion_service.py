@@ -22,6 +22,7 @@ from app.data.models.enums import (
     CampoRegla,
     EstadoCuentaCorreo,
     Moneda,
+    OrigenCompra,
     ProveedorCorreo,
     TipoMetodoPago,
 )
@@ -935,3 +936,178 @@ def test_resolver_revision_rechaza_categoria_que_no_es_hoja(
 
     with pytest.raises(ReglaDeNegocioViolada):
         servicio.resolver_revision(usuario.id, resultado.compra_id, None, grupo.id)
+
+
+# ---- conciliar_manual: crear una compra a mano, desde un comprobante cargado ----
+
+
+def test_conciliar_manual_crea_una_compra_completa(
+    servicio: ConciliacionService,
+    metodos_pago: MetodoPagoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+) -> None:
+    metodos_pago.crear(
+        CrearMetodoPagoComando(
+            usuario_id=usuario.id, alias="Amex", tipo=TipoMetodoPago.CREDITO, ultimos_cuatro="4321"
+        )
+    )
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Supermercado", color_hex="#22C55E")
+    )
+    comercio = servicio.comercios_servicio.resolver_o_crear("WALMART SAN SEBASTIAN")
+    servicio.comercios_servicio.asignar_categoria(usuario.id, comercio.id, categoria.id)
+
+    resultado = servicio.conciliar_manual(usuario.id, _parseado(banco="Banco Popular"))
+
+    assert resultado.requiere_revision is False
+    compra = servicio.compras.obtener_de_usuario(resultado.compra_id, usuario.id)
+    assert compra.origen == OrigenCompra.MANUAL
+    assert compra.total == Decimal("7870.00")
+    assert compra.metodo_pago_id is not None
+    lineas = servicio.lineas.listar_de_compra(compra.id)
+    assert len(lineas) == 1
+    assert lineas[0].categoria_id == categoria.id
+    assert lineas[0].categorizada_automaticamente is True, "vino de la sugerencia del comercio"
+
+
+def test_conciliar_manual_sin_metodo_de_pago_ni_categoria_queda_pendiente(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    resultado = servicio.conciliar_manual(usuario.id, _parseado())
+
+    assert resultado.requiere_revision is True
+    compra = servicio.compras.obtener_de_usuario(resultado.compra_id, usuario.id)
+    assert compra.metodo_pago_id is None, "nunca se inventa un metodo de pago"
+
+
+def test_conciliar_manual_con_metodo_de_pago_explicito_no_necesita_los_ultimos_cuatro(
+    servicio: ConciliacionService, metodos_pago: MetodoPagoService, usuario: Usuario
+) -> None:
+    metodo = metodos_pago.crear(
+        CrearMetodoPagoComando(
+            usuario_id=usuario.id, alias="Efectivo", tipo=TipoMetodoPago.EFECTIVO
+        )
+    )
+
+    resultado = servicio.conciliar_manual(
+        usuario.id, _parseado(ultimos_cuatro=None), metodo_pago_id=metodo.id
+    )
+
+    compra = servicio.compras.obtener_de_usuario(resultado.compra_id, usuario.id)
+    assert compra.metodo_pago_id == metodo.id
+
+
+def test_conciliar_manual_con_categoria_explicita_no_se_marca_automatica(
+    servicio: ConciliacionService, categorias: CategoriaService, usuario: Usuario
+) -> None:
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+
+    resultado = servicio.conciliar_manual(usuario.id, _parseado(), categoria_id=categoria.id)
+
+    lineas = servicio.lineas.listar_de_compra(resultado.compra_id)
+    assert lineas[0].categoria_id == categoria.id
+    assert lineas[0].categorizada_automaticamente is False, "la eligió el titular a mano"
+
+
+def test_conciliar_manual_acumula_el_presupuesto_de_la_categoria_explicita(
+    servicio: ConciliacionService,
+    presupuestos: PresupuestoService,
+    categorias: CategoriaService,
+    usuario: Usuario,
+) -> None:
+    categoria = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    presupuesto = presupuestos.crear_o_actualizar(
+        usuario.id, categoria.id, 2026, 8, Moneda.CRC, Decimal("10000")
+    )
+
+    servicio.conciliar_manual(usuario.id, _parseado(), categoria_id=categoria.id)
+
+    actualizado = presupuestos.presupuestos.obtener_de_usuario(presupuesto.id, usuario.id)
+    assert actualizado.monto_consumido == Decimal("7870.00")
+
+
+def test_conciliar_manual_sin_monto_falla(servicio: ConciliacionService, usuario: Usuario) -> None:
+    with pytest.raises(DatosInvalidos):
+        servicio.conciliar_manual(usuario.id, _parseado(monto=None))
+
+
+def test_conciliar_manual_con_moneda_no_reconocida_falla(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    with pytest.raises(DatosInvalidos):
+        servicio.conciliar_manual(usuario.id, _parseado(moneda="COP"))
+
+
+def test_conciliar_manual_rechaza_metodo_de_pago_que_no_existe(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    with pytest.raises(RecursoNoEncontrado):
+        servicio.conciliar_manual(usuario.id, _parseado(), metodo_pago_id=999999)
+
+
+def test_conciliar_manual_rechaza_metodo_de_pago_desactivado(
+    servicio: ConciliacionService, metodos_pago: MetodoPagoService, usuario: Usuario
+) -> None:
+    metodo = metodos_pago.crear(
+        CrearMetodoPagoComando(usuario_id=usuario.id, alias="Amex", tipo=TipoMetodoPago.CREDITO)
+    )
+    metodos_pago.desactivar(usuario.id, metodo.id)
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio.conciliar_manual(usuario.id, _parseado(), metodo_pago_id=metodo.id)
+
+
+def test_conciliar_manual_rechaza_categoria_que_no_existe(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    with pytest.raises(RecursoNoEncontrado):
+        servicio.conciliar_manual(usuario.id, _parseado(), categoria_id=999999)
+
+
+def test_conciliar_manual_rechaza_categoria_que_no_es_hoja(
+    servicio: ConciliacionService, categorias: CategoriaService, usuario: Usuario
+) -> None:
+    grupo = categorias.crear(
+        CrearCategoriaComando(usuario_id=usuario.id, nombre="Alimentación", color_hex="#16A34A")
+    )
+    categorias.crear(
+        CrearCategoriaComando(
+            usuario_id=usuario.id,
+            nombre="Supermercado",
+            color_hex="#22C55E",
+            categoria_padre_id=grupo.id,
+        )
+    )
+
+    with pytest.raises(ReglaDeNegocioViolada):
+        servicio.conciliar_manual(usuario.id, _parseado(), categoria_id=grupo.id)
+
+
+def test_conciliar_manual_convierte_a_la_tasa_de_la_compra_en_dolares(
+    servicio_con_tasa: ConciliacionService, usuario: Usuario
+) -> None:
+    resultado = servicio_con_tasa.conciliar_manual(
+        usuario.id, _parseado(moneda="USD", monto=Decimal("10.00"))
+    )
+
+    compra = servicio_con_tasa.compras.obtener_de_usuario(resultado.compra_id, usuario.id)
+    assert compra.moneda == Moneda.USD
+    assert compra.tipo_cambio_aplicado == Decimal("550.000000")
+    assert compra.total_moneda_base == Decimal("5500.00")
+
+
+def test_conciliar_manual_sin_comercio_usa_un_nombre_de_relleno(
+    servicio: ConciliacionService, usuario: Usuario
+) -> None:
+    """El formulario exige un comercio (lo valida el schema, no el servicio), pero
+    el servicio no revienta si de todos modos llega vacío -mismo criterio
+    defensivo del resto del servicio: nunca inventa, pero tampoco se cae."""
+    resultado = servicio.conciliar_manual(usuario.id, _parseado(comercio=None))
+
+    compra = servicio.compras.obtener_de_usuario(resultado.compra_id, usuario.id)
+    assert compra.comercio.nombre == "Comercio sin nombre"

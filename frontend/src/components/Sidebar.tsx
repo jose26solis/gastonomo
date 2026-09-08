@@ -4,6 +4,7 @@ import {
   ChartDonut,
   CreditCard,
   EnvelopeSimple,
+  FileArrowUp,
   FileText,
   Gauge,
   ListChecks,
@@ -23,6 +24,7 @@ export type Pantalla =
   | "sinpe"
   | "metodos-pago"
   | "compras"
+  | "cargar-comprobante"
   | "reglas-categorizacion"
   | "ajustes";
 
@@ -36,6 +38,7 @@ const NAV: { id: Pantalla; label: string; icon: React.ElementType }[] = [
   { id: "sinpe", label: "SINPE", icon: ArrowsLeftRight },
   { id: "metodos-pago", label: "Métodos de pago", icon: CreditCard },
   { id: "compras", label: "Compras", icon: ReceiptX },
+  { id: "cargar-comprobante", label: "Cargar comprobante", icon: FileArrowUp },
   { id: "reglas-categorizacion", label: "Reglas de categorización", icon: ListChecks },
   { id: "ajustes", label: "Ajustes", icon: SlidersHorizontal },
 ];

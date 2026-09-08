@@ -10,19 +10,25 @@ mano -y ahí sí, bajar hasta el comprobante que la generó (`/bitacora`, el
 diferenciador declarado del dominio, ver ADR-002).
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Query
 
 from app.business.errors import RecursoNoEncontrado
+from app.business.parsers.comprobante_bac import ComprobanteParseado
 from app.business.services.compra_service import CompraDetallada
 from app.business.services.conciliacion_service import LineaDesgloseComando
 from app.presentation.dependencies import (
     ServicioDeBitacora,
     ServicioDeCompras,
     ServicioDeConciliacion,
+    UsuarioActualDependencia,
     VerificarTitular,
+    verificar_mismo_usuario,
 )
 from app.presentation.schemas import (
     CompraResponse,
+    CrearComprobanteManualRequest,
     DesglosarCompraRequest,
     EventoBitacoraResponse,
     GastoPorCategoriaResponse,
@@ -118,6 +124,50 @@ def gasto_por_categoria(
         )
         for gasto in servicio.gasto_por_categoria(usuario_id, anio, mes, comercio_id)
     ]
+
+
+@router.post(
+    "/manual",
+    response_model=CompraResponse,
+    summary="Crear una compra real a partir de un comprobante cargado a mano",
+)
+def crear_manual(
+    peticion: CrearComprobanteManualRequest,
+    servicio: ServicioDeCompras,
+    conciliacion: ServicioDeConciliacion,
+    usuario_actual: UsuarioActualDependencia,
+) -> CompraResponse:
+    """Declarado antes de `/{compra_id}` por el mismo motivo que
+    `gasto-por-categoria` -acá `usuario_id` viaja en el cuerpo, no en la URL,
+    así que se verifica a mano en vez de con `VerificarTitular`.
+
+    Los campos ya vienen confirmados (o corregidos) por el titular sobre la
+    previsualización de `POST /api/comprobantes-manuales/analizar` -acá no se
+    vuelve a parsear texto, solo se arma el `ComprobanteParseado` que
+    `ConciliacionService.conciliar_manual` espera.
+    """
+    verificar_mismo_usuario(usuario_actual, peticion.usuario_id)
+    parseado = ComprobanteParseado(
+        banco=peticion.banco,
+        comercio=peticion.comercio,
+        ciudad=None,
+        pais=None,
+        fecha=datetime.combine(peticion.fecha, datetime.min.time()),
+        marca_tarjeta=None,
+        ultimos_cuatro=peticion.ultimos_cuatro,
+        autorizacion=None,
+        referencia=None,
+        tipo_transaccion="COMPRA",
+        moneda=peticion.moneda.value,
+        monto=peticion.monto,
+        confianza=1.0,  # ya confirmado por el titular -no hace falta pesarlo
+    )
+    resultado = conciliacion.conciliar_manual(
+        peticion.usuario_id, parseado, peticion.metodo_pago_id, peticion.categoria_id
+    )
+    return _respuesta(
+        servicio.obtener_detalle_del_titular(peticion.usuario_id, resultado.compra_id)
+    )
 
 
 @router.get("/{compra_id}", response_model=CompraResponse, summary="Detalle de una compra real")

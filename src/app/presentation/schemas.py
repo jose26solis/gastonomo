@@ -566,6 +566,45 @@ class DesglosarCompraRequest(BaseModel):
     lineas: list[LineaDesgloseRequest] = Field(min_length=1)
 
 
+class AnalizarComprobanteManualRequest(BaseModel):
+    """Cuerpo de POST /api/comprobantes-manuales/analizar."""
+
+    banco: str = Field(min_length=1, max_length=80, examples=["Banco Popular"])
+    texto: str = Field(min_length=1, max_length=8000)
+
+
+class ComprobanteManualAnalizadoResponse(BaseModel):
+    """Lo que el lector genérico logró sacar del texto pegado -una previsualización
+    para que el titular la corrija antes de confirmar, no algo que se guarda solo.
+    `confianza` es lo que el frontend usa para avisar si el lector encontró poco."""
+
+    banco: str
+    comercio: str | None
+    fecha: datetime | None
+    marca_tarjeta: str | None
+    ultimos_cuatro: str | None
+    autorizacion: str | None
+    referencia: str | None
+    moneda: str | None
+    monto: Decimal | None
+    confianza: float
+
+
+class CrearComprobanteManualRequest(BaseModel):
+    """Cuerpo de POST /api/compras/manual -ya con los campos confirmados (o
+    corregidos) por el titular sobre la previsualización de /analizar."""
+
+    usuario_id: int = Field(gt=0, le=_ID_MAXIMO)
+    banco: str = Field(min_length=1, max_length=80)
+    comercio: str = Field(min_length=1, max_length=200)
+    fecha: date
+    moneda: Moneda
+    monto: Decimal = Field(gt=0, lt=Decimal(10**12))
+    ultimos_cuatro: str | None = Field(default=None, min_length=4, max_length=4)
+    metodo_pago_id: int | None = Field(default=None, gt=0, le=_ID_MAXIMO)
+    categoria_id: int | None = Field(default=None, gt=0, le=_ID_MAXIMO)
+
+
 class GastoPorCategoriaResponse(BaseModel):
     """Lo gastado en una categoría, ya sumado en la base y convertido a la moneda base.
 

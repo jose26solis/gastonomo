@@ -24,10 +24,19 @@ export function formatearMes(anio: number, mes: number): string {
   return `${NOMBRES_MES[mes - 1]} ${anio}`;
 }
 
-/** `"2026-08-30T13:27:00"` -> `"30 ago"`. */
+/** `"2026-08-30T13:27:00"` (o `"2026-08-30"`, sin hora) -> `"30 ago"`.
+ *
+ * Lee el día y el mes directo del texto, sin pasar por `new Date(iso)`: un
+ * `date` sin hora (lo que manda `Compra.fecha`) lo interpreta el motor de
+ * JavaScript como medianoche UTC, y `getDate()`/`getMonth()` lo devuelven en
+ * hora local -en Costa Rica (UTC-6) esa resta corre el día uno hacia atrás,
+ * mostrando "4 set" para una compra del 5. Los primeros diez caracteres son
+ * siempre `AAAA-MM-DD` tanto si el texto trae hora como si no, así que
+ * tomarlos tal cual evita la conversión de por medio.
+ */
 export function formatearFechaCorta(iso: string): string {
-  const fecha = new Date(iso);
-  return `${fecha.getDate()} ${NOMBRES_MES[fecha.getMonth()]}`;
+  const [, mes, dia] = iso.slice(0, 10).split("-").map(Number);
+  return `${dia} ${NOMBRES_MES[mes - 1]}`;
 }
 
 /** `"2026-08-30T13:27:00Z"` -> `"30 ago, 07:27 a. m."`. Para la bitácora de

@@ -245,6 +245,175 @@ class ConciliacionService:
             presupuesto_alertado=alerta_presupuesto,
         )
 
+    def conciliar_manual(
+        self,
+        usuario_id: int,
+        parseado: ComprobanteParseado,
+        metodo_pago_id: int | None = None,
+        categoria_id: int | None = None,
+    ) -> ResultadoConciliacion:
+        """Crea una Compra real a mano, a partir de un comprobante cargado desde la
+        pantalla "Cargar comprobante" -no leído de ningún buzón vinculado.
+
+        Mismo Proceso 2 que `conciliar()` (pasos 5-9: resolver comercio,
+        categorizar, convertir, crear la Compra y acumular el presupuesto),
+        con tres diferencias: no hay `Comprobante` que marcar -`compra.origen`
+        queda `MANUAL` en vez de `INGESTA_CORREO`, y no hace falta el paso 1-3
+        de leer y guardar ningún correo-; el método de pago y la categoría
+        pueden venir explícitos del formulario en vez de emparejarse solos
+        (si no vienen, cae al mismo emparejamiento por últimos 4 dígitos y a
+        la misma categorización automática que `conciliar()`); y el actor de
+        la bitácora es el propio titular, no la ingesta.
+        """
+        if not (parseado.monto is not None and parseado.moneda and parseado.fecha is not None):
+            raise DatosInvalidos(
+                "Hace falta al menos el monto, la moneda y la fecha del comprobante."
+            )
+        moneda = Moneda(parseado.moneda) if parseado.moneda in Moneda.__members__ else None
+        if moneda is None:
+            raise DatosInvalidos(f"«{parseado.moneda}» no es una moneda que el sistema reconozca.")
+
+        # Paso 4 (método de pago): explícito si lo mandó el formulario -mismas
+        # validaciones que `resolver_revision`-, si no, el mismo
+        # emparejamiento automático por últimos 4 dígitos que `conciliar()`.
+        metodo_pago = None
+        if metodo_pago_id is not None:
+            metodo_pago = self.metodos_pago.obtener_de_usuario(metodo_pago_id, usuario_id)
+            if metodo_pago is None:
+                raise RecursoNoEncontrado(
+                    f"El método de pago {metodo_pago_id} no existe en esta cuenta."
+                )
+            if not metodo_pago.activo:
+                raise ReglaDeNegocioViolada("Ese método de pago está desactivado.")
+        elif parseado.ultimos_cuatro:
+            metodo_pago = self.metodos_pago.buscar_por_ultimos_cuatro(
+                usuario_id, parseado.ultimos_cuatro
+            )
+
+        # Paso 5: resolver el comercio -mismo catálogo compartido que conciliar().
+        comercio = self.comercios_servicio.resolver_o_crear(
+            parseado.comercio or "Comercio sin nombre"
+        )
+
+        # Paso 6 (categorización): explícita si la eligió el titular en el
+        # formulario -mismas validaciones que `resolver_revision`-, si no, la
+        # misma regla-luego-sugerencia que `conciliar()`.
+        categoria_explicita = categoria_id is not None
+        regla_aplicada = None
+        if categoria_explicita:
+            categoria = self.categorias.obtener_de_usuario(categoria_id, usuario_id)
+            if categoria is None:
+                raise RecursoNoEncontrado(f"La categoría {categoria_id} no existe en esta cuenta.")
+            if not categoria.es_hoja:
+                raise ReglaDeNegocioViolada("La categoría tiene que ser una hoja, no un grupo.")
+        else:
+            categoria_id, regla_aplicada = self._categorizar(
+                usuario_id, comercio.nombre_normalizado
+            )
+            if categoria_id is None:
+                categoria_id = self.comercios_servicio.categoria_sugerida_para(
+                    usuario_id, comercio.id
+                )
+
+        total = parseado.monto
+        tipo_cambio_aplicado = Decimal("1")
+        if moneda != _MONEDA_BASE:
+            tipo_cambio_aplicado = self._tasa_de_conversion(moneda, parseado.fecha.date())
+        total_moneda_base = (total * tipo_cambio_aplicado).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
+        requiere_revision = metodo_pago is None or categoria_id is None
+
+        compra = Compra(
+            usuario_id=usuario_id,
+            comercio_id=comercio.id,
+            metodo_pago_id=metodo_pago.id if metodo_pago else None,
+            fecha=parseado.fecha.date(),
+            descripcion=comercio.nombre,
+            moneda=moneda,
+            estado=EstadoCompra.REGISTRADA,
+            origen=OrigenCompra.MANUAL,
+            subtotal=total,
+            descuento=Decimal("0"),
+            impuesto=Decimal("0"),
+            impuesto_desglosado=False,
+            total=total,
+            tipo_cambio_aplicado=tipo_cambio_aplicado,
+            total_moneda_base=total_moneda_base,
+            requiere_revision=requiere_revision,
+        )
+        self.compras.agregar(compra)  # flush: ya tiene compra.id de acá en adelante
+
+        self.lineas.agregar(
+            LineaCompra(
+                compra_id=compra.id,
+                categoria_id=categoria_id,
+                descripcion=comercio.nombre,
+                cantidad=Decimal("1"),
+                precio_unitario=total,
+                descuento=Decimal("0"),
+                exento_impuesto=False,
+                subtotal=total,
+                # Solo cuenta como "automática" la que puso una regla o la
+                # sugerencia del comercio -no la que el titular eligió a mano
+                # en el formulario, mismo criterio que `resolver_revision`.
+                categorizada_automaticamente=(not categoria_explicita) and categoria_id is not None,
+            )
+        )
+
+        if regla_aplicada is not None:
+            regla_aplicada.veces_aplicada += 1
+
+        alerta_presupuesto = False
+        presupuesto = None
+        consumido_antes = consumido_despues = None
+        if categoria_id is not None:
+            presupuesto = self.presupuestos.buscar(
+                usuario_id, categoria_id, compra.fecha.year, compra.fecha.month
+            )
+            if presupuesto is not None and presupuesto.moneda == moneda:
+                consumido_antes = presupuesto.monto_consumido
+                porcentaje_antes, _ = PresupuestoService.calcular_estado(
+                    consumido_antes, presupuesto.monto_limite, presupuesto.umbral_alerta
+                )
+                presupuesto.monto_consumido = presupuesto.monto_consumido + total
+                consumido_despues = presupuesto.monto_consumido
+                porcentaje_despues, estado_despues = PresupuestoService.calcular_estado(
+                    consumido_despues, presupuesto.monto_limite, presupuesto.umbral_alerta
+                )
+                alerta_presupuesto = (
+                    estado_despues != EstadoPresupuesto.EN_RANGO
+                    and porcentaje_antes < presupuesto.umbral_alerta
+                )
+
+        # Un solo commit: todo lo de arriba, o nada -mismo criterio que conciliar().
+        self.compras.sesion.commit()
+
+        self._escribir_bitacora(
+            compra=compra,
+            usuario_id=usuario_id,
+            parseado=parseado,
+            metodo_pago_id=metodo_pago.id if metodo_pago else None,
+            comercio_nombre=comercio.nombre,
+            comercio_normalizado=comercio.nombre_normalizado,
+            categoria_id=categoria_id,
+            regla_aplicada=regla_aplicada,
+            tipo_cambio_aplicado=tipo_cambio_aplicado,
+            requiere_revision=requiere_revision,
+            presupuesto_id=presupuesto.id if presupuesto else None,
+            consumido_antes=consumido_antes,
+            consumido_despues=consumido_despues,
+            alerta_presupuesto=alerta_presupuesto,
+            actor=Actor(tipo="TITULAR", usuario_id=usuario_id),
+        )
+
+        return ResultadoConciliacion(
+            compra_id=compra.id,
+            requiere_revision=requiere_revision,
+            presupuesto_alertado=alerta_presupuesto,
+        )
+
     def recategorizar_compras_de_comercio(
         self, usuario_id: int, comercio_id: int, categoria_id: int
     ) -> int:
@@ -609,8 +778,12 @@ class ConciliacionService:
         consumido_antes: Decimal | None,
         consumido_despues: Decimal | None,
         alerta_presupuesto: bool,
+        actor: Actor | None = None,
     ) -> None:
-        actor = Actor(tipo="SERVICIO", nombre="ingesta-correo")
+        # Por default, "lo hizo la ingesta automática" -el caso de siempre.
+        # `conciliar_manual` pasa un actor `TITULAR`: fue la persona, no un
+        # buzón, quien pegó este comprobante.
+        actor = actor or Actor(tipo="SERVICIO", nombre="ingesta-correo")
 
         def registrar(tipo: str, datos: dict) -> None:
             self.bitacora.registrar_evento(

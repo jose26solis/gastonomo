@@ -33,6 +33,7 @@ from app.presentation.routers import (
     categorias,
     comercios,
     compras,
+    comprobantes_manuales,
     cuentas_correo,
     metodos_pago,
     presupuestos,
@@ -78,6 +79,7 @@ app.include_router(comercios.router)
 app.include_router(presupuestos.router)
 app.include_router(metodos_pago.router)
 app.include_router(compras.router)
+app.include_router(comprobantes_manuales.router)
 app.include_router(reglas_categorizacion.router)
 app.include_router(reportes.router)
 app.include_router(tipo_cambio.router)

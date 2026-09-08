@@ -310,3 +310,23 @@ export interface TransferenciaSinpe {
   proveedor: Proveedor;
   direccion_cuenta: string;
 }
+
+/**
+ * Lo que el lector genérico logró sacar de un comprobante pegado a mano -una
+ * previsualización para corregir antes de confirmar, no algo que ya se
+ * guardó. Ver "Cargar comprobante" (`CargarComprobante.tsx`) -para un banco
+ * sin lector exacto, como BAC.
+ */
+export interface ComprobanteManualAnalizado {
+  banco: string;
+  comercio: string | null;
+  fecha: string | null;
+  marca_tarjeta: string | null;
+  ultimos_cuatro: string | null;
+  autorizacion: string | null;
+  referencia: string | null;
+  moneda: string | null;
+  /** Viaja como string desde Pydantic (Decimal). */
+  monto: string | null;
+  confianza: number;
+}

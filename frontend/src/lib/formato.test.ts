@@ -41,6 +41,14 @@ describe("formatearFechaCorta", () => {
   it("muestra el día y el mes abreviado, sin el año", () => {
     expect(formatearFechaCorta("2026-08-30T13:27:00")).toBe("30 ago");
   });
+
+  it("una fecha sin hora (Compra.fecha) no se corre un día -sin importar la zona horaria", () => {
+    // `new Date("2026-09-05")` la interpreta como medianoche UTC; en una
+    // zona horaria negativa (Costa Rica, UTC-6) `getDate()` local daría "4",
+    // no "5" -exactamente el bug que esto fija. No hace falta simular la
+    // zona horaria del entorno de pruebas: la función ya no pasa por `Date`.
+    expect(formatearFechaCorta("2026-09-05")).toBe("5 set");
+  });
 });
 
 describe("formatearFechaHora", () => {

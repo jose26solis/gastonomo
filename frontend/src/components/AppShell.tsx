@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Usuario } from "../types";
 import { Ajustes } from "../pages/Ajustes";
 import { Bancos } from "../pages/Bancos";
+import { CargarComprobante } from "../pages/CargarComprobante";
 import { Categorias } from "../pages/Categorias";
 import { Compras } from "../pages/Compras";
 import { ConectarCorreo } from "../pages/ConectarCorreo";
@@ -24,6 +25,7 @@ const TITULOS: Record<Pantalla, [string, string]> = {
   sinpe: ["Fuentes", "Transferencias SINPE"],
   "metodos-pago": ["Fuentes", "Métodos de pago"],
   compras: ["Conciliación", "Compras"],
+  "cargar-comprobante": ["Conciliación", "Cargar comprobante"],
   "reglas-categorizacion": ["Conciliación", "Reglas de categorización"],
   ajustes: ["Cuenta", "Ajustes"],
 };
@@ -106,6 +108,12 @@ export function AppShell({
           )}
           {pantalla === "metodos-pago" && <MetodosPago usuarioId={usuarioId} />}
           {pantalla === "compras" && <Compras usuarioId={usuarioId} />}
+          {pantalla === "cargar-comprobante" && (
+            <CargarComprobante
+              usuarioId={usuarioId}
+              onIrACompras={() => setPantalla("compras")}
+            />
+          )}
           {pantalla === "reglas-categorizacion" && (
             <ReglasCategorizacion usuarioId={usuarioId} />
           )}

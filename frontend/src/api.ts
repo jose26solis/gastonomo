@@ -12,6 +12,7 @@ import type {
   Categoria,
   ComercioClasificado,
   Compra,
+  ComprobanteManualAnalizado,
   ComprobanteParseado,
   CuentaCorreo,
   ErrorDeApi,
@@ -499,6 +500,46 @@ export const api = {
 
   obtenerCompra(usuarioId: number, compraId: number): Promise<Compra> {
     return peticion(`/api/compras/${compraId}?usuario_id=${usuarioId}`);
+  },
+
+  /** Lee lo que se pueda del texto de un comprobante pegado a mano -para un
+   * banco sin lector exacto (solo BAC lo tiene). No persiste nada, es solo
+   * una previsualización para corregir antes de `crearComprobanteManual`. */
+  analizarComprobanteManual(banco: string, texto: string): Promise<ComprobanteManualAnalizado> {
+    return peticion("/api/comprobantes-manuales/analizar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ banco, texto }),
+    });
+  },
+
+  /** Confirma los campos (ya corregidos si hacía falta) y crea la Compra real. */
+  crearComprobanteManual(datos: {
+    usuarioId: number;
+    banco: string;
+    comercio: string;
+    fecha: string;
+    moneda: string;
+    monto: string;
+    ultimosCuatro?: string;
+    metodoPagoId?: number;
+    categoriaId?: number;
+  }): Promise<Compra> {
+    return peticion("/api/compras/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario_id: datos.usuarioId,
+        banco: datos.banco,
+        comercio: datos.comercio,
+        fecha: datos.fecha,
+        moneda: datos.moneda,
+        monto: datos.monto,
+        ultimos_cuatro: datos.ultimosCuatro ?? null,
+        metodo_pago_id: datos.metodoPagoId ?? null,
+        categoria_id: datos.categoriaId ?? null,
+      }),
+    });
   },
 
   /** Corrige a mano el método de pago y/o la categoría de una compra -pensada

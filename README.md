@@ -440,6 +440,8 @@ La documentación interactiva de la API se genera sola. Abrila en el navegador:
 | `POST` | `/api/metodos-pago` | Registra un método de pago (alias, tipo, últimos 4 -solo débito/crédito-, entidad, día de corte -solo crédito-) |
 | `GET` | `/api/metodos-pago?usuario_id=1` | Lista los métodos de pago del titular |
 | `DELETE` | `/api/metodos-pago/{id}?usuario_id=1` | Desactiva un método de pago (no lo borra: una `Compra` ya conciliada sigue apuntándolo) |
+| `POST` | `/api/comprobantes-manuales/analizar` | Lee lo que se pueda del texto de un comprobante pegado a mano -previsualización, no guarda nada. Para un banco sin lector exacto (solo BAC lo tiene) |
+| `POST` | `/api/compras/manual` | Confirma los campos (ya corregidos si hacía falta) y crea la compra real, con el mismo Proceso 2 que una compra por correo |
 | `GET` | `/api/compras?usuario_id=1` | Lista las compras reales del titular, más recientes primero. Con `&requiere_revision=true` trae solo las que quedaron sin método de pago o sin categoría al conciliar |
 | `GET` | `/api/compras/{id}?usuario_id=1` | Detalle de una compra real, con el nombre de su comercio/método/categoría ya resueltos |
 | `POST` | `/api/compras/{id}/resolver?usuario_id=1` | Corrige a mano el método de pago y/o la categoría de una compra -pensado para resolver una que quedó `requiere_revision` |
@@ -933,10 +935,17 @@ Pendiente:
 - [x] Conectar la aplicación a MongoDB para lo que corresponda al subdominio documental -ver
       [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb)
 - [x] Vinculación de Gmail en el frontend, de punta a punta contra una cuenta real de Google
-- [ ] Sumar otros bancos además de BAC a las compras -contra una notificación real de cada uno,
-      igual que siempre. Para transferencias SINPE ya hay un lector genérico que cubre cualquier
-      banco de forma aproximada (ver arriba); un lector exacto validado para otro banco puntual
-      sigue pendiente de una notificación real de ese banco
+- [x] Sumar otros bancos además de BAC a las compras -pantalla nueva **Cargar comprobante**: para
+      un banco sin lector exacto (todavía solo BAC lo tiene, validado contra una notificación
+      real), el titular pega el texto de la notificación y un lector genérico
+      (`comprobante_generico.py`) intenta sacar comercio, monto, moneda, fecha y últimos 4
+      dígitos -mismo criterio que el lector genérico que ya existía para transferencias SINPE. El
+      titular siempre confirma o corrige antes de que se convierta en un gasto real (nunca se
+      guarda solo), y de ahí en adelante corre el mismo Proceso 2 que una compra por correo
+      (`ConciliacionService.conciliar_manual`): emparejar método de pago, categorizar, convertir
+      moneda y acumular presupuesto. Un lector *exacto* para un banco puntual (como el de BAC)
+      sigue pendiente de una notificación real de ese banco -este lector genérico es el mientras
+      tanto, no un reemplazo.
 - [x] Proceso transaccional de conciliación: acumular el consumo de un presupuesto como una
       `Compra` de negocio de verdad, en vez de recalcularlo en cada consulta a partir de
       `Comprobante` -ver [Conciliación real y bitácora en MongoDB](#conciliación-real-y-bitácora-en-mongodb)
