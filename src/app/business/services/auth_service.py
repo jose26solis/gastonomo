@@ -298,10 +298,21 @@ class AuthService:
             "Si no fuiste vos, podés ignorar este correo: tu contraseña actual sigue "
             "funcionando igual."
         )
-        if self.correo is not None:
-            self.correo.enviar(usuario.correo, "Restablecer tu contraseña de Gastonomo", cuerpo)
-        else:
+        if self.correo is None:
             logger.warning("Envío de correo no configurado. Enlace de recuperación: %s", enlace)
+            return
+
+        try:
+            self.correo.enviar(usuario.correo, "Restablecer tu contraseña de Gastonomo", cuerpo)
+        except Exception:
+            # Nunca deja que una falla de SMTP (credenciales mal puestas, el
+            # proveedor caído, lo que sea) se cuele como un 500 -eso rompería
+            # justo la garantía de este método: una cuenta que sí existe daría
+            # un código de respuesta distinto al de una que no, revelando lo
+            # que se supone que nunca hay que revelar. El enlace igual queda
+            # en el log, así que un correo real no se pierde -solo no llega
+            # por la vía que se esperaba.
+            logger.exception("Falló el envío del correo de recuperación. Enlace: %s", enlace)
 
     def restablecer_contrasena(self, token: str, contrasena_nueva: str) -> Sesion:
         """Confirma el enlace de recuperación y deja la cuenta con la contraseña nueva.

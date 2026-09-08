@@ -282,6 +282,32 @@ def _con_correo_falso(sesion) -> list[tuple[str, str, str]]:
     return enviados
 
 
+def _con_correo_que_falla(sesion) -> None:
+    class CorreoQueFalla:
+        def enviar(self, destinatario: str, asunto: str, cuerpo: str) -> None:
+            raise OSError("smtplib.SMTPAuthenticationError simulado")
+
+    def _armar() -> AuthService:
+        return AuthService(UsuarioRepository(sesion), correo=CorreoQueFalla())
+
+    app.dependency_overrides[obtener_servicio_de_auth] = _armar
+
+
+def test_solicitar_recuperacion_da_200_aunque_el_envio_de_correo_falle(
+    cliente: TestClient, usuario: Usuario, sesion
+) -> None:
+    """Confirma end-to-end el bug que se arregló: unas credenciales de SMTP mal
+    puestas no pueden traducirse en un 500 -eso delataría que ese correo sí
+    tiene cuenta, distinto del 200 parejo que da uno que no existe."""
+    _con_correo_que_falla(sesion)
+    try:
+        respuesta = cliente.post("/api/auth/recuperar/solicitar", json={"correo": usuario.correo})
+    finally:
+        del app.dependency_overrides[obtener_servicio_de_auth]
+
+    assert respuesta.status_code == 200
+
+
 def test_solicitar_recuperacion_da_200_con_el_mismo_mensaje_exista_o_no_la_cuenta(
     cliente: TestClient, usuario: Usuario, sesion
 ) -> None:

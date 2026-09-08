@@ -471,6 +471,21 @@ def test_solicitar_recuperacion_manda_el_enlace_por_el_servicio_de_correo(
     assert "/restablecer-contrasena?token=" in cuerpo
 
 
+def test_solicitar_recuperacion_con_smtp_que_falla_no_revienta(sesion: Session) -> None:
+    """Fija la garantía real de este método: una falla de SMTP (credenciales mal
+    puestas, el proveedor caído) no puede dar un error distinto del que da un
+    correo que no existe -eso revelaría justo lo que nunca hay que revelar."""
+
+    class CorreoQueFalla:
+        def enviar(self, destinatario: str, asunto: str, cuerpo: str) -> None:
+            raise OSError("smtplib.SMTPAuthenticationError simulado")
+
+    servicio = AuthService(UsuarioRepository(sesion), correo=CorreoQueFalla())
+    resultado = _registrar(servicio)
+
+    servicio.solicitar_recuperacion_contrasena(resultado.usuario.correo)
+
+
 def test_restablecer_contrasena_con_un_enlace_valido_cambia_la_contrasena(
     sesion: Session,
 ) -> None:
